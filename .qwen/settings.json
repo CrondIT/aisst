@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(dev.max.ru)"
+      "WebFetch(dev.max.ru)",
+      "WebSearch"
     ]
-  }
+  },
+  "$version": 3
 }

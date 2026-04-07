@@ -72,10 +72,8 @@ def verify_webhook_secret(
         return True  # secret не настроен — пропускаем
     if not secret_header:
         return False
-    expected = hashlib.sha256(
-        (WEBHOOK_SECRET + payload_body.decode("utf-8")).encode("utf-8")
-    ).hexdigest()
-    return secret_header == expected
+    # MAX API отправляет секрет в plain text, а не хеш
+    return secret_header == WEBHOOK_SECRET
 
 
 async def process_update(update: dict):
@@ -100,17 +98,26 @@ async def process_update(update: dict):
 
     logger.info(f"Сообщение от {sender.get('name')}: {user_text}")
 
-    # Вызываем GigaChat в отдельном потоке (он синхронный)
-    loop = asyncio.get_event_loop()
-    answer = await loop.run_in_executor(executor, lambda: giga.chat(user_text))
+    try:
+        # Вызываем GigaChat в отдельном потоке (он синхронный)
+        loop = asyncio.get_event_loop()
+        answer = await loop.run_in_executor(executor, lambda: giga.chat(user_text))
+        
+        if not answer or not answer.choices:
+            logger.error(f"GigaChat вернул пустой ответ для запроса: {user_text}")
+            await send_message(user_id, "Извините, не смог сформировать ответ.")
+            return
 
-    reply_text = answer.choices[0].message.content
+        reply_text = answer.choices[0].message.content
 
-    # Обрезаем если ответ > 4000 символов (лимит MAX API)
-    if len(reply_text) > 4000:
-        reply_text = reply_text[:3997] + "..."
+        # Обрезаем если ответ > 4000 символов (лимит MAX API)
+        if len(reply_text) > 4000:
+            reply_text = reply_text[:3997] + "..."
 
-    await send_message(user_id, reply_text)
+        await send_message(user_id, reply_text)
+    except Exception as e:
+        logger.error(f"Ошибка при обработке сообщения: {e}", exc_info=True)
+        await send_message(user_id, f"Произошла ошибка: {str(e)}")
 
 
 # ─── Webhook endpoint ───
@@ -118,9 +125,12 @@ async def process_update(update: dict):
 async def webhook(request: Request):
     """Endpoint для приёма webhook-обновлений от MAX"""
     body = await request.body()
+    logger.info(f"Получен webhook: {body.decode('utf-8', errors='replace')}")
 
     # Проверка secret
     secret_header = request.headers.get("X-Max-Bot-Api-Secret")
+    logger.info(f"X-Max-Bot-Api-Secret header: '{secret_header}'")
+    logger.info(f"WEBHOOK_SECRET из .env: '{WEBHOOK_SECRET}'")
     if not verify_webhook_secret(body, secret_header):
         logger.warning("Неверный X-Max-Bot-Api-Secret — запрос отклонён")
         raise HTTPException(status_code=403, detail="Invalid secret")
@@ -216,4 +226,6 @@ async def delete_subscription(subscription_id: int = None):
 
 
 if __name__ == "__main__":
+    # Для запуска через gunicorn на Unix socket:
+    # gunicorn -w 1 -k uvicorn.workers.UvicornWorker main:app --bind unix:/root/aisst/fastapi.sock
     uvicorn.run(app, host="0.0.0.0", port=8000)
