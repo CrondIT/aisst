@@ -1,16 +1,51 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 import httpx
 import uvicorn
 import asyncio
 import logging
 import os
-import hashlib
-from global_state import MAX_API_TOKEN, MAX_BASE_URL, GIGACHAT_API_KEY
+from global_state import (
+    MAX_API_TOKEN,
+    MAX_BASE_URL,
+    GIGACHAT_API_KEY,
+    WEBHOOK_URL,
+    WEBHOOK_SECRET,
+)
 from gigachat import GigaChat
 from concurrent.futures import ThreadPoolExecutor
 
-app = FastAPI()
+# ThreadPoolExecutor для запуска sync GigaChat в отдельном потоке
+executor = ThreadPoolExecutor(max_workers=10)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan-событие: замена устаревшему @app.on_event('startup')"""
+    logger.info(f"Startup: WEBHOOK_URL={WEBHOOK_URL!r}")
+    logger.info(f"Startup: WEBHOOK_SECRET={'***' if WEBHOOK_SECRET else '(пусто)'}")
+
+    # Startup
+    if WEBHOOK_URL:
+        await subscribe_webhook()
+    else:
+        logger.warning(
+            "WEBHOOK_URL не задан. Webhook НЕ активирован. "
+            "Установите WEBHOOK_URL в .env или используйте Long Polling."
+        )
+    yield
+    # Shutdown (при необходимости можно добавить очистку)
+
+
+app = FastAPI(lifespan=lifespan)
+
+# Статические файлы
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -19,13 +54,6 @@ logger.info(
 )
 logger.info(f"MAX_BASE_URL: {MAX_BASE_URL}")
 
-# ─── Настройки webhook ───
-# URL, на который MAX будет присылать обновления (строго HTTPS, порт 443)
-# Для продакшена укажите реальный домен,
-# например: https://mybot.example.com/webhook
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
-# Секрет для проверки подлинности webhook (задайте в .env или оставьте пустым)
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 
 giga = GigaChat(
     credentials=GIGACHAT_API_KEY,
@@ -33,9 +61,6 @@ giga = GigaChat(
     model="GigaChat",
     ca_bundle_file="russian_trusted_root_ca_pem.crt",
 )
-
-# ThreadPoolExecutor для запуска sync GigaChat в отдельном потоке
-executor = ThreadPoolExecutor(max_workers=10)
 
 
 async def send_message(user_id: int, text: str):
@@ -100,12 +125,18 @@ async def process_update(update: dict):
 
     try:
         # Вызываем GigaChat в отдельном потоке (он синхронный)
-        loop = asyncio.get_event_loop()
-        answer = await loop.run_in_executor(executor, lambda: giga.chat(user_text))
-        
+        answer = await asyncio.get_running_loop().run_in_executor(
+            executor,
+            lambda: giga.chat(user_text)
+        )
+
         if not answer or not answer.choices:
-            logger.error(f"GigaChat вернул пустой ответ для запроса: {user_text}")
-            await send_message(user_id, "Извините, не смог сформировать ответ.")
+            logger.error(
+                f"GigaChat вернул пустой ответ для запроса: {user_text}"
+            )
+            await send_message(
+                user_id, "Извините, не смог сформировать ответ."
+            )
             return
 
         reply_text = answer.choices[0].message.content
@@ -124,8 +155,12 @@ async def process_update(update: dict):
 @app.post("/webhook")
 async def webhook(request: Request):
     """Endpoint для приёма webhook-обновлений от MAX"""
+    logger.info(f"=== Входящий webhook запрос ===")
+    logger.info(f"Method: {request.method}, URL: {request.url}")
+    logger.info(f"Headers: {dict(request.headers)}")
+
     body = await request.body()
-    logger.info(f"Получен webhook: {body.decode('utf-8', errors='replace')}")
+    logger.info(f"Body: {body.decode('utf-8', errors='replace')}")
 
     # Проверка secret
     secret_header = request.headers.get("X-Max-Bot-Api-Secret")
@@ -154,25 +189,16 @@ async def webhook(request: Request):
     return JSONResponse(content={"status": "ok"})
 
 
-# ─── Health check ───
+# ─── Health check / Главная страница ───
 @app.get("/")
 async def health_check():
+    index_path = os.path.join(STATIC_DIR, "index.html")
+    if os.path.isfile(index_path):
+        return FileResponse(index_path)
     return {"status": "ok", "webhook_url": WEBHOOK_URL or "not set"}
 
 
 # ─── Управление подписками ───
-@app.on_event("startup")
-async def startup():
-    """При старте — создаём webhook-подписку (если WEBHOOK_URL задан)"""
-    if not WEBHOOK_URL:
-        logger.warning(
-            "WEBHOOK_URL не задан. Webhook НЕ активирован. "
-            "Установите WEBHOOK_URL в .env или используйте Long Polling."
-        )
-        return
-
-    await subscribe_webhook()
-
 
 async def subscribe_webhook():
     """Создание webhook-подписки через POST /subscriptions"""
@@ -195,7 +221,8 @@ async def subscribe_webhook():
                 logger.info(f"Webhook подписка создана: {WEBHOOK_URL}")
             else:
                 logger.error(
-                    f"Ошибка создания webhook: {response.status_code} — {response.text}"
+                    f"Ошибка создания webhook: {response.status_code}"
+                    f" — {response.text}"
                 )
         except Exception as e:
             logger.error(f"Исключение при создании webhook: {e}")
@@ -227,5 +254,6 @@ async def delete_subscription(subscription_id: int = None):
 
 if __name__ == "__main__":
     # Для запуска через gunicorn на Unix socket:
-    # gunicorn -w 1 -k uvicorn.workers.UvicornWorker main:app --bind unix:/root/aisst/fastapi.sock
+    # g gunicorn -w 1 -k uvicorn.workers.UvicornWorker 
+    # main:app --bind unix:/tmp/fastapi.sock --umask 000
     uvicorn.run(app, host="0.0.0.0", port=8000)

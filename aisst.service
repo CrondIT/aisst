@@ -1,0 +1,17 @@
+[Unit]
+Description=AISST Gunicorn Service
+After=network.target
+
+[Service]
+Type=notify
+User=root
+Group=www-data
+WorkingDirectory=/root/aisst
+Environment=PATH="/root/aisst/.venv/bin"
+ExecStart=/root/aisst/.venv/bin/gunicorn -w 1 -k uvicorn.workers.UvicornWorker main:app --bind unix:/tmp/fastapi.sock --umask 000
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

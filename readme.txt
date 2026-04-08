@@ -20,3 +20,17 @@ uvicorn bot:app --reload
 
 
      https://github.com/zhanymkanov/fastapi-best-practices
+
+
+     Скопируй на сервер и активируй:
+
+     1 # Копируем юнит
+     2 scp aisst.service root@cv6438947:/etc/systemd/system/aisst.service
+     3
+     4 # На сервере:
+     5 systemctl daemon-reload
+     6 systemctl enable aisst
+     7 systemctl start aisst
+     8 systemctl status aisst
+
+    Теперь сервис будет запускаться автоматически при перезагрузке и рестартовать при падении.
