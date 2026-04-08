@@ -14,6 +14,7 @@ from global_state import (
     GIGACHAT_API_KEY,
     WEBHOOK_URL,
     WEBHOOK_SECRET,
+    GIGACHAT_SCOPE,
 )
 from gigachat import GigaChat
 from concurrent.futures import ThreadPoolExecutor
@@ -26,7 +27,9 @@ executor = ThreadPoolExecutor(max_workers=10)
 async def lifespan(app: FastAPI):
     """Lifespan-событие: замена устаревшему @app.on_event('startup')"""
     logger.info(f"Startup: WEBHOOK_URL={WEBHOOK_URL!r}")
-    logger.info(f"Startup: WEBHOOK_SECRET={'***' if WEBHOOK_SECRET else '(пусто)'}")
+    logger.info(
+        f"Startup: WEBHOOK_SECRET={'***' if WEBHOOK_SECRET else '(пусто)'}"
+    )
 
     # Startup
     if WEBHOOK_URL:
@@ -57,7 +60,7 @@ logger.info(f"MAX_BASE_URL: {MAX_BASE_URL}")
 
 giga = GigaChat(
     credentials=GIGACHAT_API_KEY,
-    scope="GIGACHAT_API_PERS",
+    scope=GIGACHAT_SCOPE,
     model="GigaChat",
     ca_bundle_file="russian_trusted_root_ca_pem.crt",
 )
@@ -155,7 +158,7 @@ async def process_update(update: dict):
 @app.post("/webhook")
 async def webhook(request: Request):
     """Endpoint для приёма webhook-обновлений от MAX"""
-    logger.info(f"=== Входящий webhook запрос ===")
+    logger.info("=== Входящий webhook запрос ===")
     logger.info(f"Method: {request.method}, URL: {request.url}")
     logger.info(f"Headers: {dict(request.headers)}")
 
@@ -254,6 +257,6 @@ async def delete_subscription(subscription_id: int = None):
 
 if __name__ == "__main__":
     # Для запуска через gunicorn на Unix socket:
-    # g gunicorn -w 1 -k uvicorn.workers.UvicornWorker 
+    # g gunicorn -w 1 -k uvicorn.workers.UvicornWorker
     # main:app --bind unix:/tmp/fastapi.sock --umask 000
     uvicorn.run(app, host="0.0.0.0", port=8000)
