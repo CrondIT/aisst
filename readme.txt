@@ -34,3 +34,7 @@ uvicorn bot:app --reload
      8 systemctl status aisst
 
     Теперь сервис будет запускаться автоматически при перезагрузке и рестартовать при падении.
+
+    gunicorn -w 1 -k uvicorn.workers.UvicornWorker main:app --bind unix:/tmp/fastapi.sock --umask 000
+
+    

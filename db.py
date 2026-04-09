@@ -97,7 +97,7 @@ async def create_user(
         userid: int,
         nickname: str,
         coins: int = 0,
-        giftcoins: int = 0,
+        giftcoins: int = 10,
         note: str = None
 ) -> bool:
     """
@@ -112,7 +112,7 @@ async def create_user(
             result = await db.execute(select(User).where(User.id == userid))
             existing_user = result.scalar_one_or_none()
             if existing_user:
-                print(f"Ошибка: пользователь с userid={userid} уже есть.")
+                print(f"Пользователь с userid={userid} уже есть в базе.")
                 return False
 
             now = datetime.now()
@@ -163,7 +163,11 @@ async def get_user(userid: int) -> dict | None:
         return None
 
 
-async def change_all_coins(userid: int, coins: int, giftcoins: int) -> bool:
+async def add_coins(
+        userid: int,
+        coins: int = 0,
+        giftcoins: int = 0
+) -> bool:
     """
     Обновляет количество coins и giftcoins,
     и устанавливает coindate в текущее время
