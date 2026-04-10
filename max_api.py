@@ -2,21 +2,45 @@
 
 import httpx
 import asyncio
-import logging
+import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from global_state import (
     MAX_API_TOKEN,
     MAX_BASE_URL,
     WEBHOOK_URL,
     WEBHOOK_SECRET,
+    TRUSTED_WEBHOOK_IPS,
+    RATE_LIMIT_PER_MINUTE,
 )
 import bot_logic
 import db
-
-logger = logging.getLogger(__name__)
+from utils import logger
 
 # ThreadPoolExecutor для запуска sync GigaChat в отдельном потоке
 executor = ThreadPoolExecutor(max_workers=10)
+
+# ─── Rate limiting ───
+_rate_limit_store: dict[int, list[float]] = defaultdict(list)
+
+
+def _check_rate_limit(user_id: int) -> bool:
+    """
+    Проверяет лимит запросов для пользователя.
+    Возвращает True, если запрос разрешён, False — если превышен.
+    """
+    now = time.monotonic()
+    window = 60.0  # 1 минута
+    timestamps = _rate_limit_store[user_id]
+
+    # Удаляем устаревшие записи
+    timestamps[:] = [t for t in timestamps if now - t < window]
+
+    if len(timestamps) >= RATE_LIMIT_PER_MINUTE:
+        return False
+
+    timestamps.append(now)
+    return True
 
 
 async def send_message(user_id: int, text: str) -> int | None:
@@ -49,9 +73,10 @@ def verify_webhook_secret(
         payload_body: bytes,
         secret_header: str | None
 ) -> bool:
-    """Проверка подлинности webhook по secret (если WEBHOOK_SECRET задан)."""
+    """Проверка подлинности webhook по secret. WEBHOOK_SECRET обязателен."""
     if not WEBHOOK_SECRET:
-        return True  # secret не настроен — пропускаем
+        logger.error("WEBHOOK_SECRET не задан в .env — webhook отключён")
+        return False
     if not secret_header:
         return False
     # MAX API отправляет секрет в plain text, а не хеш
@@ -125,6 +150,14 @@ async def process_update(update: dict, giga_client) -> None:
         logger.warning(f"Пропущено: user_id={user_id}, text={user_text}")
         return
 
+    # ─── Rate limiting ───
+    if not _check_rate_limit(user_id):
+        logger.warning(f"Rate limit превышен для user_id={user_id}")
+        await send_message(
+            user_id, "Превышен лимит запросов. Попробуйте через минуту."
+        )
+        return
+
     logger.info(f"Сообщение от {sender.get('name')}: {user_text}")
 
     # ─── Создание пользователя в БД, если не существует ───
@@ -174,6 +207,13 @@ async def handle_webhook(request) -> tuple[bool, dict | None]:
     """
     from fastapi import HTTPException
 
+    # ─── IP-фильтрация ───
+    if TRUSTED_WEBHOOK_IPS:
+        client_ip = request.client.host if request.client else ""
+        if client_ip not in TRUSTED_WEBHOOK_IPS:
+            logger.warning(f"Webhook отклонён: недоверенный IP {client_ip}")
+            raise HTTPException(status_code=403, detail="IP not trusted")
+
     logger.info("=== Входящий webhook запрос ===")
     logger.info(f"Method: {request.method}, URL: {request.url}")
     logger.info(f"Headers: {dict(request.headers)}")
@@ -184,7 +224,6 @@ async def handle_webhook(request) -> tuple[bool, dict | None]:
     # Проверка secret
     secret_header = request.headers.get("X-Max-Bot-Api-Secret")
     logger.info(f"X-Max-Bot-Api-Secret header: '{secret_header}'")
-    logger.info(f"WEBHOOK_SECRET из .env: '{WEBHOOK_SECRET}'")
     if not verify_webhook_secret(body, secret_header):
         logger.warning("Неверный X-Max-Bot-Api-Secret — запрос отклонён")
         raise HTTPException(status_code=403, detail="Invalid secret")

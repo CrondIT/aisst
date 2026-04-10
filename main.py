@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi import APIRouter
 import uvicorn
-import logging
 import os
 from global_state import (
     MAX_API_TOKEN,
@@ -16,16 +15,30 @@ from global_state import (
     WEBHOOK_URL,
     WEBHOOK_SECRET,
     GIGACHAT_SCOPE,
+    ADMIN_API_TOKEN,
 )
+from fastapi import Depends, Header, HTTPException
 from gigachat import GigaChat
 import max_api
 import db
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from utils import logger, setup_logging
 
 # ─── Роуты ───
 router = APIRouter()
+
+
+def _verify_admin(
+    x_admin_token: str = Header(default=None)
+) -> None:
+    """Зависимость: проверка ADMIN_API_TOKEN для админ-эндпоинтов."""
+    if not ADMIN_API_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="ADMIN_API_TOKEN not configured"
+        )
+    if x_admin_token != ADMIN_API_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 
 @router.post("/webhook")
@@ -53,14 +66,19 @@ async def health_check(request: Request):
 
 
 @router.get("/subscriptions")
-async def get_subscriptions():
-    """Просмотр текущих подписок."""
+async def get_subscriptions(
+    _admin: None = Depends(_verify_admin)
+):
+    """Просмотр текущих подписок (требуется ADMIN_API_TOKEN)."""
     return await max_api.get_subscriptions()
 
 
 @router.delete("/subscriptions")
-async def delete_subscription(subscription_id: int = None):
-    """Удаление webhook-подписки."""
+async def delete_subscription(
+    subscription_id: int = None,
+    _admin: None = Depends(_verify_admin)
+):
+    """Удаление webhook-подписки (требуется ADMIN_API_TOKEN)."""
     return await max_api.delete_subscription(subscription_id)
 
 
@@ -73,15 +91,27 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """Lifespan-событие: замена устаревшему @app.on_event('startup')."""
+        # ─── Инициализация логирования (один раз при старте) ───
+        setup_logging()
+
+        # ─── Валидация безопасности ───
+        if not WEBHOOK_SECRET:
+            logger.critical(
+                "WEBHOOK_SECRET не задан в .env! "
+                "Приложение не запущено — настройте секрет."
+            )
+            raise RuntimeError("WEBHOOK_SECRET is required")
+        if not ADMIN_API_TOKEN:
+            logger.warning(
+                "ADMIN_API_TOKEN не задан — /subscriptions недоступен"
+            )
+
         # ─── Инициализация БД ───
         logger.info("Creating database...")
         await db.create_database()
         logger.info("Database initialized")
 
         logger.info(f"Startup: WEBHOOK_URL={WEBHOOK_URL!r}")
-        logger.info(
-            f"Startup: WEBHOOK_SECRET={'***' if WEBHOOK_SECRET else '(пусто)'}"
-        )
 
         # Startup
         if WEBHOOK_URL:

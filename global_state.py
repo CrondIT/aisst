@@ -22,5 +22,20 @@ GIGACHAT_SCOPE = os.getenv("GIGACHAT_SCOPE") or "GIGACHAT_API_PERS"
 # Для продакшена укажите реальный домен,
 # например: https://mybot.example.com/webhook
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
-# Секрет для проверки подлинности webhook (задайте в .env или оставьте пустым)
+# Секрет для проверки подлинности webhook (обязателен в .env)
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+
+# ─── Безопасность ───
+# Токен для доступа к админ-эндпоинтам (/subscriptions)
+ADMIN_API_TOKEN = os.getenv("ADMIN_API_TOKEN", "")
+
+# Список доверенных IP для /webhook (пусто = без фильтрации)
+# MAX API может присылать с разных IP — задайте реальные при необходимости
+TRUSTED_WEBHOOK_IPS = [
+    ip.strip()
+    for ip in os.getenv("TRUSTED_WEBHOOK_IPS", "").split(",")
+    if ip.strip()
+]
+
+# Rate limiting: макс. запросов на пользователя в минуту
+RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "30"))

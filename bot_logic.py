@@ -1,9 +1,7 @@
 """Модуль бизнес-логики бота: обработка команд и сообщений."""
 
-import logging
 import db
-
-logger = logging.getLogger(__name__)
+# from utils import logger
 
 
 async def handle_command(user_text: str, sender: dict) -> str | None:
