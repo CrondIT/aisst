@@ -1,6 +1,30 @@
 import logging
 import sys
 from loguru import logger
+from global_state import PROXY_IP, PROXY_PORT, PROXY_USER, PROXY_PASSWORD
+
+
+def get_socks_proxy_mount() -> "httpx.HTTPTransport | None":
+    """
+    Создаёт HTTPTransport с SOCKS5-прокси для httpx.
+    Возвращает None, если прокси не настроен.
+
+    Требует: pip install httpx-socks
+
+    Использование:
+        transport = get_socks_proxy_mount()
+        if transport:
+            client = httpx.AsyncClient(transport=transport)
+        else:
+            client = httpx.AsyncClient()
+    """
+    if not PROXY_IP:
+        return None
+
+    from httpx_socks import AsyncProxyTransport
+
+    proxy_url = get_proxy_url()  # socks5://user:pass@ip
+    return AsyncProxyTransport.from_url(proxy_url)
 
 
 # 1. Создаем класс, который перехватывает стандартные логи и отдает их в Loguru
@@ -23,6 +47,22 @@ class InterceptHandler(logging.Handler):
         )
 
 
+def get_proxy_url() -> str | None:
+    """
+    Возвращает URL SOCKS5-прокси для использования в http-клиентах.
+    Формат: socks5://user:password@ip:port
+    Если PROXY_IP не задан — возвращает None.
+    """
+    if not PROXY_IP:
+        return None
+
+    if PROXY_USER and PROXY_PASSWORD:
+        return (
+            f"socks5://{PROXY_USER}:{PROXY_PASSWORD}@{PROXY_IP}:{PROXY_PORT}"
+        )
+    return f"socks5://{PROXY_IP}:{PROXY_PORT}"
+
+
 def setup_logging():
     # Полностью очищаем настройки стандартного логгера
     logging.root.handlers = [InterceptHandler()]
@@ -38,7 +78,7 @@ def setup_logging():
         handlers=[
             {
                 "sink": sys.stdout,
-                "format": "<red>{time:HH:mm:ss}</red> | <level>{message}</level>",
+                "format": "<yellow>{time:HH:mm:ss}</yellow> | <level>{message}</level>",
             },
             {
                 "sink": "app_unified.log",

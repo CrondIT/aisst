@@ -5,6 +5,7 @@ from sqlalchemy import (
     String,
     BigInteger,
     DateTime,
+    Boolean,
     func,
 )
 from sqlalchemy.ext.asyncio import (
@@ -51,7 +52,12 @@ class User(Base):
     )
     coins: Mapped[int] = mapped_column(Integer, default=0)
     giftcoins: Mapped[int] = mapped_column(Integer, default=0)
+    # заметки, на будущее
     note: Mapped[str] = mapped_column(String(150), default="")
+    # уровнь доступа пользователя 0 - администратор, 1 - гость, 2 - сотрудник
+    permission: Mapped[int] = mapped_column(Integer, default=1)
+    # логическое поле на будущее
+    check: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 async def create_database():
@@ -98,7 +104,9 @@ async def create_user(
         nickname: str,
         coins: int = 0,
         giftcoins: int = 10,
-        note: str = None
+        note: str = None,
+        permission: int = 1,
+        check: bool = False,
 ) -> bool:
     """
     Создаёт пользователя в таблице users.
@@ -123,7 +131,8 @@ async def create_user(
                 coindate=now,
                 coins=coins,
                 giftcoins=giftcoins,
-                note=note or ""
+                note=note or "",
+                permission=permission,
             )
             db.add(new_user)
             await db.commit()
@@ -155,6 +164,7 @@ async def get_user(userid: int) -> dict | None:
                     "coins": user.coins,
                     "giftcoins": user.giftcoins,
                     "note": user.note,
+                    "permission": user.permission,
                 }
             return None
 

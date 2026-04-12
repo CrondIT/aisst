@@ -3,7 +3,8 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse
+from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi import APIRouter
 import uvicorn
@@ -45,10 +46,13 @@ def _verify_admin(
 async def webhook(request: Request):
     """Endpoint для приёма webhook-обновлений от MAX."""
     _, data = await max_api.handle_webhook(request)
+
     giga_client = request.app.giga_client
 
     # Платформа может присылать один Update или массив
     if isinstance(data, list):
+        #  process_update (в max_api.py) → `send_message` (в max_api.py)
+        # → HTTP POST к MAX API.
         for update_item in data:
             await max_api.process_update(update_item, giga_client)
     else:
@@ -58,11 +62,10 @@ async def webhook(request: Request):
 
 
 @router.get("/")
-async def health_check(request: Request):
-    index_path = os.path.join(request.app.static_dir, "index.html")
-    if os.path.isfile(index_path):
-        return FileResponse(index_path)
-    return {"status": "ok", "webhook_url": WEBHOOK_URL or "not set"}
+async def index(request: Request):
+    return request.app.templates.TemplateResponse(
+        request, "index.html"
+    )
 
 
 @router.get("/subscriptions")
@@ -87,6 +90,9 @@ def create_app() -> FastAPI:
 
     # ─── Static files ───
     static_dir = os.path.join(os.path.dirname(__file__), "static")
+    # ─── Template files ───
+    templates_dir = os.path.join(os.path.dirname(__file__), "templates")
+    templates = Jinja2Templates(directory=templates_dir)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -133,6 +139,9 @@ def create_app() -> FastAPI:
     if os.path.isdir(static_dir):
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+    app.static_dir = static_dir
+    app.templates = templates
+
     # ─── GigaChat client ───
     app.giga_client = GigaChat(
         credentials=GIGACHAT_API_KEY,
@@ -140,7 +149,6 @@ def create_app() -> FastAPI:
         model="GigaChat",
         ca_bundle_file="russian_trusted_root_ca_pem.crt",
     )
-    app.static_dir = static_dir
 
     # Регистрируем роуты
     app.include_router(router)
