@@ -1,6 +1,9 @@
 """Модуль бизнес-логики бота: обработка команд и сообщений."""
 
 import db
+from global_state import (
+    user_modes,
+)
 # from utils import logger
 
 
@@ -15,10 +18,11 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
     command_parts = user_text.split(maxsplit=1)
     command = command_parts[0].lower()
 
+    user_name = sender.get("name", "Неизвестный пользователь")
+    user_id = sender.get("user_id")
+    user_data = await db.get_user(user_id)
+
     if command == "/billing":
-        user_name = sender.get("name", "Неизвестный пользователь")
-        user_id = sender.get("user_id")
-        user_data = await db.get_user(user_id)
         if user_data:
             balance = user_data["coins"] + user_data["giftcoins"]
             return (
@@ -29,8 +33,11 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
 
     # Будущие команды:
     if command == "/start":
-        return "Привет! Я бот на базе GigaChat."
-    if command == "/help":
-        return "Доступные команды: /start, /billing, /help"
+        return "start"
+    if command == "/file":
+        return "file"
+    if command == "/edit":
+        user_modes[user_id] = "edit"
+        return "edit"
 
     return None

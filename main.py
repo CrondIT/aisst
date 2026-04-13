@@ -2,11 +2,9 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from fastapi import APIRouter
 import uvicorn
 import os
 from global_state import (
@@ -18,71 +16,12 @@ from global_state import (
     GIGACHAT_SCOPE,
     ADMIN_API_TOKEN,
 )
-from fastapi import Depends, Header, HTTPException
 from gigachat import GigaChat
 import max_api
 import db
 
 from utils import logger, setup_logging
-
-# ─── Роуты ───
-router = APIRouter()
-
-
-def _verify_admin(
-    x_admin_token: str = Header(default=None)
-) -> None:
-    """Зависимость: проверка ADMIN_API_TOKEN для админ-эндпоинтов."""
-    if not ADMIN_API_TOKEN:
-        raise HTTPException(
-            status_code=503,
-            detail="ADMIN_API_TOKEN not configured"
-        )
-    if x_admin_token != ADMIN_API_TOKEN:
-        raise HTTPException(status_code=403, detail="Forbidden")
-
-
-@router.post("/webhook")
-async def webhook(request: Request):
-    """Endpoint для приёма webhook-обновлений от MAX."""
-    _, data = await max_api.handle_webhook(request)
-
-    giga_client = request.app.giga_client
-
-    # Платформа может присылать один Update или массив
-    if isinstance(data, list):
-        #  process_update (в max_api.py) → `send_message` (в max_api.py)
-        # → HTTP POST к MAX API.
-        for update_item in data:
-            await max_api.process_update(update_item, giga_client)
-    else:
-        await max_api.process_update(data, giga_client)
-
-    return JSONResponse(content={"status": "ok"})
-
-
-@router.get("/")
-async def index(request: Request):
-    return request.app.templates.TemplateResponse(
-        request, "index.html"
-    )
-
-
-@router.get("/subscriptions")
-async def get_subscriptions(
-    _admin: None = Depends(_verify_admin)
-):
-    """Просмотр текущих подписок (требуется ADMIN_API_TOKEN)."""
-    return await max_api.get_subscriptions()
-
-
-@router.delete("/subscriptions")
-async def delete_subscription(
-    subscription_id: int = None,
-    _admin: None = Depends(_verify_admin)
-):
-    """Удаление webhook-подписки (требуется ADMIN_API_TOKEN)."""
-    return await max_api.delete_subscription(subscription_id)
+from routers import router
 
 
 def create_app() -> FastAPI:

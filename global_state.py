@@ -19,6 +19,8 @@ MAX_REF_IMAGES = 6  # Максимальное количество изобра
 
 load_dotenv(override=True)
 
+TEMP_DIR = os.path.join(os.path.dirname(__file__), "temp")
+
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
