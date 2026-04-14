@@ -5,6 +5,7 @@ import asyncio
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse
 from global_state import (
     MAX_API_TOKEN,
     MAX_BASE_URL,
@@ -146,34 +147,36 @@ async def process_update(update: dict, giga_client) -> None:
     if sender.get("is_bot"):
         return
 
-    # Проверяем, не голосовое ли это сообщение
-    voice = body.get("voice")
-    if voice and not user_text:
+    # Проверяем, не голосовое ли это сообщение (audio attachment)
+    attachments = body.get("attachments", [])
+    voice_url = None
+    voice_ext = ".ogg"
+    for att in attachments:
+        if att.get("type") == "audio":
+            payload = att.get("payload", {})
+            voice_url = payload.get("url")
+            # Попробуем определить расширение из URL
+            if voice_url:
+                parsed = urlparse(voice_url)
+                path = parsed.path
+                if "." in path:
+                    voice_ext = "." + path.rsplit(".", 1)[1].lower()
+            break
+
+    if voice_url and not user_text:
         logger.info(
             f"Голосовое сообщение от {sender.get('name')} (user_id={user_id})"
         )
         await send_message(user_id, "Распознаю голосовое сообщение...")
 
         try:
-            # Скачиваем аудиофайл
-            file_url = voice.get("file_url") or voice.get("url")
-            if not file_url:
-                await send_message(
-                    user_id, "Не удалось получить ссылку на аудио."
-                )
-                return
-
             async with httpx.AsyncClient() as client:
-                resp = await client.get(file_url)
+                resp = await client.get(voice_url)
                 resp.raise_for_status()
                 audio_data = resp.content
 
-            ext = voice.get("extension") or ".ogg"
-            if not ext.startswith("."):
-                ext = f".{ext}"
-
             # Транскрибируем через общую функцию
-            user_text = await bot_logic.transcribe_audio(audio_data, ext)
+            user_text = await bot_logic.transcribe_audio(audio_data, voice_ext)
             if not user_text:
                 await send_message(
                     user_id,
