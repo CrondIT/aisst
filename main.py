@@ -15,8 +15,11 @@ from global_state import (
     WEBHOOK_SECRET,
     GIGACHAT_SCOPE,
     ADMIN_API_TOKEN,
+    GEMINI_API_KEY,
+    MODELS,
 )
 from gigachat import GigaChat
+import google.generativeai as genai
 import max_api
 import db
 
@@ -57,6 +60,10 @@ def create_app() -> FastAPI:
         logger.info("Database initialized")
 
         logger.info(f"Startup: WEBHOOK_URL={WEBHOOK_URL!r}")
+
+        # ----------- Инициализация ИИ моделей -----------
+        genai.configure(api_key=GEMINI_API_KEY)
+        app.image_model = genai.GenerativeModel(MODELS['image'])
 
         # Startup
         if WEBHOOK_URL:

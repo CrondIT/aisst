@@ -36,6 +36,7 @@ GIGACHAT_API_KEY = os.getenv("GIGACHAT_API_KEY")
 GIGACHAT_SCOPE = os.getenv("GIGACHAT_SCOPE") or "GIGACHAT_API_PERS"
 
 # Данные для подключения к OpenAI и Gemini
+# Получаем токены для разных режимов
 OPENAI_API_KEY_CHAT = os.getenv("OPENAI_API_KEY")
 OPENAI_API_KEY_IMAGE = os.getenv("OPENAI_API_KEY_IMAGE")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")

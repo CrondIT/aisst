@@ -146,6 +146,51 @@ async def process_update(update: dict, giga_client) -> None:
     if sender.get("is_bot"):
         return
 
+    # Проверяем, не голосовое ли это сообщение
+    voice = body.get("voice")
+    if voice and not user_text:
+        logger.info(
+            f"Голосовое сообщение от {sender.get('name')} (user_id={user_id})"
+        )
+        await send_message(user_id, "Распознаю голосовое сообщение...")
+
+        try:
+            # Скачиваем аудиофайл
+            file_url = voice.get("file_url") or voice.get("url")
+            if not file_url:
+                await send_message(
+                    user_id, "Не удалось получить ссылку на аудио."
+                )
+                return
+
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(file_url)
+                resp.raise_for_status()
+                audio_data = resp.content
+
+            ext = voice.get("extension") or ".ogg"
+            if not ext.startswith("."):
+                ext = f".{ext}"
+
+            # Транскрибируем через общую функцию
+            user_text = await bot_logic.transcribe_audio(audio_data, ext)
+            if not user_text:
+                await send_message(
+                    user_id,
+                    "Не удалось распознать речь в сообщении.",
+                )
+                return
+
+            logger.info(
+                f"Транскрибация голосового (user_id={user_id}): {user_text}"
+            )
+        except Exception as e:
+            logger.error(f"Ошибка транскрибации: {e}", exc_info=True)
+            await send_message(
+                user_id, f"Ошибка распознавания: {str(e)}"
+            )
+            return
+
     if not user_id or not user_text:
         logger.warning(f"Пропущено: user_id={user_id}, text={user_text}")
         return
