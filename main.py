@@ -19,6 +19,8 @@ from global_state import (
     MODELS,
 )
 from gigachat import GigaChat
+from gigachat.async_client import GigaChatAsync
+from ai_models import GigaChatClient
 import google.generativeai as genai
 import max_api
 import db
@@ -89,12 +91,14 @@ def create_app() -> FastAPI:
     app.templates = templates
 
     # ─── GigaChat client ───
-    app.giga_client = GigaChat(
+    giga_client = GigaChatAsync(
         credentials=GIGACHAT_API_KEY,
         scope=GIGACHAT_SCOPE,
         model="GigaChat",
         ca_bundle_file="russian_trusted_root_ca_pem.crt",
     )
+
+    app.giga_model = GigaChatClient(giga_client)
 
     # Регистрируем роуты
     app.include_router(router)

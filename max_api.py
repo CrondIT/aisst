@@ -167,32 +167,9 @@ async def process_update(update: dict, giga_client) -> None:
         logger.info(
             f"Голосовое сообщение от {sender.get('name')} (user_id={user_id})"
         )
-        await send_message(user_id, "Распознаю голосовое сообщение...")
+        await send_message(user_id, "Не распознаю голосовое сообщение...")
 
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(voice_url)
-                resp.raise_for_status()
-                audio_data = resp.content
-
-            # Транскрибируем через общую функцию
-            user_text = await bot_logic.transcribe_audio(audio_data, voice_ext)
-            if not user_text:
-                await send_message(
-                    user_id,
-                    "Не удалось распознать речь в сообщении.",
-                )
-                return
-
-            logger.info(
-                f"Транскрибация голосового (user_id={user_id}): {user_text}"
-            )
-        except Exception as e:
-            logger.error(f"Ошибка транскрибации: {e}", exc_info=True)
-            await send_message(
-                user_id, f"Ошибка распознавания: {str(e)}"
-            )
-            return
+        return
 
     if not user_id or not user_text:
         logger.warning(f"Пропущено: user_id={user_id}, text={user_text}")
