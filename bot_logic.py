@@ -1,19 +1,12 @@
 """Модуль бизнес-логики бота: обработка команд и сообщений."""
 
-import asyncio
-import os
-import tempfile
-import httpx
+
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import Request
 
 import db
 from global_state import (
     user_modes,
-    GIGACHAT_API_KEY,
-    GIGACHAT_SCOPE,
-    GIGACHAT_CLIENT_ID,
-    GIGACHAT_CLIENT_SECRET,
 )
 from utils import logger
 from gigachat import GigaChat

@@ -1,7 +1,6 @@
 """Модуль для взаимодействия с MAX API."""
 
 import httpx
-import asyncio
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -199,10 +198,12 @@ async def process_update(update: dict, giga_client) -> None:
 
     try:
         # Вызываем GigaChat в отдельном потоке (он синхронный)
-        answer = await asyncio.get_running_loop().run_in_executor(
-            executor,
-            lambda: giga_client.chat(user_text)
-        )
+        # answer = await asyncio.get_running_loop().run_in_executor(
+        #    executor,
+        #    lambda: giga_client.chat(user_text)
+        # )
+
+        answer = await bot_logic.handle_message(user_text, sender)
 
         if not answer or not answer.choices:
             logger.error(

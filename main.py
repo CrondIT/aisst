@@ -64,8 +64,19 @@ def create_app() -> FastAPI:
         logger.info(f"Startup: WEBHOOK_URL={WEBHOOK_URL!r}")
 
         # ----------- Инициализация ИИ моделей -----------
-        genai.configure(api_key=GEMINI_API_KEY)
-        app.image_model = genai.GenerativeModel(MODELS['image'])
+        # ─── Gemini ───
+        # genai.configure(api_key=GEMINI_API_KEY)
+        # app.image_model = genai.GenerativeModel(MODELS['image'])
+
+        # ─── GigaChat ───
+        giga_client = GigaChatAsync(
+            credentials=GIGACHAT_API_KEY,
+            scope=GIGACHAT_SCOPE,
+            model="GigaChat",
+            ca_bundle_file="russian_trusted_root_ca_pem.crt",
+        )
+
+        app.giga_model = GigaChatClient(giga_client)
 
         # Startup
         if WEBHOOK_URL:
@@ -89,16 +100,6 @@ def create_app() -> FastAPI:
 
     app.static_dir = static_dir
     app.templates = templates
-
-    # ─── GigaChat client ───
-    giga_client = GigaChatAsync(
-        credentials=GIGACHAT_API_KEY,
-        scope=GIGACHAT_SCOPE,
-        model="GigaChat",
-        ca_bundle_file="russian_trusted_root_ca_pem.crt",
-    )
-
-    app.giga_model = GigaChatClient(giga_client)
 
     # Регистрируем роуты
     app.include_router(router)

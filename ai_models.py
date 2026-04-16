@@ -36,7 +36,10 @@ class GigaChatClient:
         except AuthenticationError as e:
             raise RuntimeError(f"Ошибка аутентификации GigaChat: {e}")
         except RateLimitError as e:
-            raise RuntimeError(f"Достигнут лимит скорости. Повторите через {e.retry_after} сек.")
+            raise RuntimeError(
+                f"Достигнут лимит скорости. "
+                f"Повторите через {e.retry_after} сек."
+            )
         except BadRequestError as e:
             raise RuntimeError(f"Неверный запрос: {e}")
         except ForbiddenError as e:
