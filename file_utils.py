@@ -9,8 +9,6 @@ import xlrd  # noqa # Required for legacy XLS files
 import pytesseract
 from PIL import Image as PILImage
 import fitz  # PyMuPDF
-
-# Additional imports for new file formats
 from pptx import Presentation
 import olefile
 from odf.opendocument import load

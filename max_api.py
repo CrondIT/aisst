@@ -10,11 +10,16 @@ from global_state import (
     WEBHOOK_SECRET,
     TRUSTED_WEBHOOK_IPS,
     RATE_LIMIT_PER_MINUTE,
+    TEMP_DIR,
 )
 import bot_logic
 import db
 from utils import logger
 from fastapi import Request
+import os
+from PIL import Image
+from io import BytesIO
+from datetime import datetime
 
 # ─── Rate limiting ───
 _rate_limit_store: dict[int, list[float]] = defaultdict(list)
@@ -133,6 +138,33 @@ async def delete_subscription(subscription_id: int = None) -> dict:
         return response.json()
 
 
+async def save_user_image(image_url: str, user_id: int) -> str | None:
+    """Скачивает и сохраняет изображение пользователя в temp/."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(image_url)
+            if response.status_code != 200:
+                logger.error(f"Ошибка скачивания: {response.status_code}")
+                return None
+
+            image = Image.open(BytesIO(response.content))
+
+            if image.mode in ("RGBA", "P"):
+                image = image.convert("RGB")
+
+            timestamp = int(datetime.now().timestamp() * 1000)
+            filename = f"photo_{user_id}_{timestamp}.jpg"
+            filepath = os.path.join(TEMP_DIR, filename)
+
+            image.save(filepath, "JPEG", quality=95)
+            logger.info(f"Сохранено изображение: {filepath}")
+            return filepath
+
+    except Exception as e:
+        logger.error(f"Ошибка сохранения изображения: {e}")
+        return None
+
+
 async def process_update(update: dict, request: Request) -> None:
     """Обработка одного обновления."""
     if update.get("update_type") != "message_created":
@@ -149,18 +181,22 @@ async def process_update(update: dict, request: Request) -> None:
         return
 
     attachments = body.get("attachments", [])
-    voice_url = None
+    attr_url = None
     for att in attachments:
+        attr_url = att.get("payload", {}).get("url")
         if att.get("type") == "audio":
-            voice_url = att.get("payload", {}).get("url")
+            voice_url = attr_url
+            if voice_url and not user_text:
+                logger.info(
+                    f"Голосовое сообщение от {sender.get('name')} "
+                    f"(user_id={user_id})"
+                )
+                await send_message(user_id, "Не распознаю голосовое ...")
+                return
             break
-
-    if voice_url and not user_text:
-        logger.info(
-            f"Голосовое сообщение от {sender.get('name')} (user_id={user_id})"
-        )
-        await send_message(user_id, "Не распознаю голосовое сообщение...")
-        return
+        if att.get("type") == "image" and attr_url:
+            image_path = await save_user_image(attr_url, user_id)
+            pass
 
     if not user_id or not user_text:
         logger.warning(f"Пропущено: user_id={user_id}, text={user_text}")
