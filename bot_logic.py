@@ -1,7 +1,6 @@
 """Модуль бизнес-логики бота: обработка команд и сообщений."""
 
 
-from concurrent.futures import ThreadPoolExecutor
 from fastapi import Request
 
 import db
@@ -9,10 +8,6 @@ from global_state import (
     user_modes,
 )
 from utils import logger
-from gigachat import GigaChat
-import ai_models
-
-_executor = ThreadPoolExecutor(max_workers=10)
 
 
 async def handle_command(user_text: str, sender: dict) -> str | None:
@@ -40,9 +35,12 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
         return f"Пользователь: {user_name} в списках не значится)"
 
     # Будущие команды:
-    if command == "/chat":
-        user_modes[user_id] = "chat"
-        return "chat"
+    if command == "/gigachat":
+        user_modes[user_id] = "gigachat"
+        return "gigachat"
+    if command == "/gigachatpro":
+        user_modes[user_id] = "gigachatpro"
+        return "gigachatpro"
     if command == "/file":
         user_modes[user_id] = "file"
         return "file"
@@ -53,16 +51,34 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
     return None
 
 
-async def handle_message(user_text: str, sender: dict) -> str | None:
+async def handle_message(
+        request: Request,
+        user_text: str,
+        sender: dict
+) -> str | None:
     """Обработка сообщений пользователя."""
     user_id = sender.get("user_id")
+    if not user_modes[user_id]:
+        user_modes[user_id] = "gigachat"
+    logger.info(
+        f"handle_message: user_id={user_id}, mode={user_modes[user_id]}"
+    )
 
     match user_modes[user_id]:
-        case "chat":
-            return await Request.app.giga_model.generate(user_text)
+        case "gigachat":
+            return await request.app.state.giga_client.generate(
+                user_text,
+                max_tokens=1000,
+            )
+        case "gigachatpro":
+            return await request.app.state.giga_client.generate(
+                user_text,
+                model="GigaChat-Pro",
+            )
         case "file":
-            pass
+            return "Режим работы с файлами ещё не реализован."
         case "edit":
-            pass
+            return "Режим редактирования ещё не реализован."
         case None:
-            pass
+            # по умолчанию - режим gigachat
+            return "Используйте /chat для начала общения с ИИ."

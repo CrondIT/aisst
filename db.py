@@ -1,5 +1,6 @@
 from datetime import datetime
 from dotenv import load_dotenv
+from utils import logger
 from sqlalchemy import (
     Integer,
     String,
@@ -80,7 +81,8 @@ async def create_database():
                 await db.refresh(new_user)
 
     except Exception as e:
-        print(f"Ошибка при создании базы или системного пользователя: {e}")
+        logger.error(f"Ошибка при создании базы: {e}")
+        raise
 
 
 async def check_user(userid: int) -> bool:
@@ -95,7 +97,7 @@ async def check_user(userid: int) -> bool:
             user = result.scalar_one_or_none()
             return user is not None
     except Exception as e:
-        print(f"Ошибка при проверке пользователя: {e}")
+        logger.error(f"Ошибка при проверке пользователя: {e}")
         return False
 
 
@@ -120,7 +122,7 @@ async def create_user(
             result = await db.execute(select(User).where(User.id == userid))
             existing_user = result.scalar_one_or_none()
             if existing_user:
-                print(f"Пользователь с userid={userid} уже есть в базе.")
+                logger.info(f"Пользователь с userid={userid} уже есть в базе.")
                 return False
 
             now = datetime.now()
@@ -139,7 +141,7 @@ async def create_user(
             return True
 
     except Exception as e:
-        print(f"Ошибка при создании пользователя: {e}")
+        logger.error(f"Ошибка при создании пользователя: {e}")
         return False
 
 
@@ -169,7 +171,7 @@ async def get_user(userid: int) -> dict | None:
             return None
 
     except Exception as e:
-        print(f"Ошибка при получении данных пользователя: {e}")
+        logger.error(f"Ошибка при получении данных пользователя: {e}")
         return None
 
 
@@ -201,5 +203,5 @@ async def add_coins(
             return True
 
     except Exception as e:
-        print(f"Ошибка при обновлении данных: {e}")
+        logger.error(f"Ошибка при обновлении данных: {e}")
         return False

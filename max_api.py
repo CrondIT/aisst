@@ -3,8 +3,6 @@
 import httpx
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import urlparse
 from global_state import (
     MAX_API_TOKEN,
     MAX_BASE_URL,
@@ -16,9 +14,7 @@ from global_state import (
 import bot_logic
 import db
 from utils import logger
-
-# ThreadPoolExecutor для запуска sync GigaChat в отдельном потоке
-executor = ThreadPoolExecutor(max_workers=10)
+from fastapi import Request
 
 # ─── Rate limiting ───
 _rate_limit_store: dict[int, list[float]] = defaultdict(list)
@@ -85,6 +81,13 @@ def verify_webhook_secret(
 
 async def subscribe_webhook() -> None:
     """Создание webhook-подписки через POST /subscriptions."""
+    if not MAX_API_TOKEN:
+        logger.critical("MAX_API_TOKEN не задан в .env!")
+        raise RuntimeError("MAX_API_TOKEN is required")
+    if not MAX_BASE_URL:
+        logger.critical("MAX_BASE_URL не задан в .env!")
+        raise RuntimeError("MAX_BASE_URL is required")
+
     url = f"{MAX_BASE_URL}/subscriptions"
     headers = {
         "Authorization": MAX_API_TOKEN,
@@ -130,7 +133,7 @@ async def delete_subscription(subscription_id: int = None) -> dict:
         return response.json()
 
 
-async def process_update(update: dict, giga_client) -> None:
+async def process_update(update: dict, request: Request) -> None:
     """Обработка одного обновления."""
     if update.get("update_type") != "message_created":
         return
@@ -142,24 +145,14 @@ async def process_update(update: dict, giga_client) -> None:
     user_id = sender.get("user_id")
     user_text = body.get("text", "")
 
-    # Игнорируем сообщения от самого бота
     if sender.get("is_bot"):
         return
 
-    # Проверяем, не голосовое ли это сообщение (audio attachment)
     attachments = body.get("attachments", [])
     voice_url = None
-    voice_ext = ".ogg"
     for att in attachments:
         if att.get("type") == "audio":
-            payload = att.get("payload", {})
-            voice_url = payload.get("url")
-            # Попробуем определить расширение из URL
-            if voice_url:
-                parsed = urlparse(voice_url)
-                path = parsed.path
-                if "." in path:
-                    voice_ext = "." + path.rsplit(".", 1)[1].lower()
+            voice_url = att.get("payload", {}).get("url")
             break
 
     if voice_url and not user_text:
@@ -167,14 +160,12 @@ async def process_update(update: dict, giga_client) -> None:
             f"Голосовое сообщение от {sender.get('name')} (user_id={user_id})"
         )
         await send_message(user_id, "Не распознаю голосовое сообщение...")
-
         return
 
     if not user_id or not user_text:
         logger.warning(f"Пропущено: user_id={user_id}, text={user_text}")
         return
 
-    # ─── Rate limiting ───
     if not _check_rate_limit(user_id):
         logger.warning(f"Rate limit превышен для user_id={user_id}")
         await send_message(
@@ -184,39 +175,28 @@ async def process_update(update: dict, giga_client) -> None:
 
     logger.info(f"Сообщение от {sender.get('name')}: {user_text}")
 
-    # ─── Создание пользователя в БД, если не существует ───
-    # в db.create_user уже встроена проверка существования пользователя
     nickname = sender.get("name", f"user_{user_id}")
     if await db.create_user(user_id, nickname):
         logger.info(f"Создан пользователь: {nickname} (id={user_id})")
 
-    # Проверяем, не команда ли это
     command_response = await bot_logic.handle_command(user_text, sender)
     if command_response is not None:
         await send_message(user_id, command_response)
         return
 
     try:
-        # Вызываем GigaChat в отдельном потоке (он синхронный)
-        # answer = await asyncio.get_running_loop().run_in_executor(
-        #    executor,
-        #    lambda: giga_client.chat(user_text)
-        # )
+        reply_text = await bot_logic.handle_message(request, user_text, sender)
 
-        answer = await bot_logic.handle_message(user_text, sender)
-
-        if not answer or not answer.choices:
+        if not reply_text:
             logger.error(
-                f"GigaChat вернул пустой ответ для запроса: {user_text}"
+                f"Пустой ответ для пользователя: {user_id} "
+                f"для запроса: {user_text}"
             )
             await send_message(
                 user_id, "Извините, не смог сформировать ответ."
             )
             return
 
-        reply_text = answer.choices[0].message.content
-
-        # Обрезаем если ответ > 4000 символов (лимит MAX API)
         if len(reply_text) > 4000:
             reply_text = reply_text[:3997] + "..."
 

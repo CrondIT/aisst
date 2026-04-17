@@ -58,14 +58,11 @@ async def webhook(request: Request):
     """Endpoint для приёма webhook-обновлений от MAX."""
     _, data = await max_api.handle_webhook(request)
 
-    giga_client = request.app.giga_client
-
-    # Платформа может присылать один Update или массив
     if isinstance(data, list):
         for update_item in data:
-            await max_api.process_update(update_item, giga_client)
+            await max_api.process_update(update_item, request)
     else:
-        await max_api.process_update(data, giga_client)
+        await max_api.process_update(data, request)
 
     return JSONResponse(content={"status": "ok"})
 
