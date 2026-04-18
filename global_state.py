@@ -28,6 +28,7 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 # Данные бота
 MAX_API_TOKEN = os.getenv("MAX_API_TOKEN")
 MAX_BASE_URL = os.getenv("MAX_BASE_URL") or "https://platform-api.max.ru"
+MAX_DB_PATH = os.getenv("MAX_DB_PATH")
 
 # Данные для подключения к GigaChat
 GIGACHAT_CLIENT_ID = os.getenv("GIGACHAT_CLIENT_ID")

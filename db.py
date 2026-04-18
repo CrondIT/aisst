@@ -1,5 +1,4 @@
 from datetime import datetime
-from dotenv import load_dotenv
 from utils import logger
 from sqlalchemy import (
     Integer,
@@ -18,10 +17,10 @@ from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
     mapped_column,
+    relationship,  # добавить
+    ForeignKey,   # тоже понадобится для внешнего ключа
 )
-
-# Загрузить переменные из файла .env
-load_dotenv()
+from global_state import MAX_DB_PATH
 
 
 # Инициализация асинхронной базы данных
@@ -29,8 +28,7 @@ class Base(DeclarativeBase):
     pass
 
 
-DATABASE_URL = "sqlite+aiosqlite:///maxbot.db"
-engine = create_async_engine(DATABASE_URL, echo=False)
+engine = create_async_engine(MAX_DB_PATH, echo=False)
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
@@ -59,6 +57,28 @@ class User(Base):
     permission: Mapped[int] = mapped_column(Integer, default=1)
     # логическое поле на будущее
     check: Mapped[bool] = mapped_column(Boolean, default=False)
+    billings: Mapped[list["Billing"]] = relationship(back_populates="user")
+
+
+class Billing(Base):
+    __tablename__ = "billings"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id"), index=True
+    )
+    date: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now()
+    )
+    usermode: Mapped[str] = mapped_column(String(50))
+    userprompt: Mapped[str] = mapped_column(String(255), default="")
+    inccoins: Mapped[int] = mapped_column(Integer, default=0)
+    deccoins: Mapped[int] = mapped_column(Integer, default=0)
+    balance: Mapped[int] = mapped_column(Integer, default=0)
+    notes: Mapped[str] = mapped_column(String(150), default="")
+    user: Mapped["User"] = relationship(back_populates="billings")
 
 
 async def create_database():
@@ -205,3 +225,85 @@ async def add_coins(
     except Exception as e:
         logger.error(f"Ошибка при обновлении данных: {e}")
         return False
+
+
+async def add_billing(
+    userid: int,
+    usermode: str,
+    userprompt: str = "",
+    inccoins: int = 0,
+    deccoins: int = 0,
+    notes: str = "",
+) -> bool:
+    """
+    Создаёт запись в billings и обновляет баланс пользователя.
+    Возвращает True при успехе, False — при ошибке.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            from sqlalchemy import select
+            result = await db.execute(select(User).where(User.id == userid))
+            user = result.scalar_one_or_none()
+
+            if not user:
+                return False
+
+            balance = user.coins + user.giftcoins + inccoins - deccoins
+
+            new_billing = Billing(
+                user_id=userid,
+                usermode=usermode,
+                userprompt=userprompt,
+                inccoins=inccoins,
+                deccoins=deccoins,
+                balance=balance,
+                notes=notes,
+            )
+            db.add(new_billing)
+
+            user.coins += inccoins
+            user.giftcoins -= deccoins
+
+            await db.commit()
+            return True
+
+    except Exception as e:
+        logger.error(f"Ошибка при создании billing: {e}")
+        return False
+
+
+async def get_billing_history(
+        userid: int,
+        limit: int = 50
+    ) -> list[dict] | None:
+    """
+    Возвращает историю billings для пользователя.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            from sqlalchemy import select, desc
+            result = await db.execute(
+                select(Billing)
+                .where(Billing.user_id == userid)
+                .order_by(desc(Billing.datetime))
+                .limit(limit)
+            )
+            billings = result.scalars().all()
+
+            return [
+                {
+                    "id": b.id,
+                    "datetime": b.datetime,
+                    "usermode": b.usermode,
+                    "userprompt": b.userprompt,
+                    "inccoins": b.inccoins,
+                    "deccoins": b.deccoins,
+                    "balance": b.balance,
+                    "notes": b.notes,
+                }
+                for b in billings
+            ]
+
+    except Exception as e:
+        logger.error(f"Ошибка при получении истории billings: {e}")
+        return None
