@@ -20,3 +20,11 @@ with GigaChat(
     models = client.get_models()
     for model in models.data:
         print(f"{model.id_} (owned_by={model.owned_by})")
+
+ALLOWED_EXTENSIONS = {
+    "guestrag": {".pdf", ".docx", ".txt"},
+    "file": {".pdf", ".docx", ".txt"},
+}
+ext = "truww.pdf".split('.')[-1].lower()
+print(ext)
+print(ext in ALLOWED_EXTENSIONS.get("guestrag"))

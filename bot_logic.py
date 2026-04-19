@@ -8,6 +8,7 @@ from global_state import (
     user_modes,
 )
 from utils import logger
+from load_from_file import save_to_vector_db
 
 
 async def handle_command(user_text: str, sender: dict) -> str | None:
@@ -47,6 +48,11 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
     if command == "/edit":
         user_modes[user_id] = "edit"
         return "edit"
+    if command == "/guestrag":
+        user_modes[user_id] = "guestrag"
+        return (
+            "Режим редактирование векторной базы данные для ИИ агента гостя"
+        )
 
     return None
 
@@ -79,6 +85,32 @@ async def handle_message(
             return "Режим работы с файлами ещё не реализован."
         case "edit":
             return "Режим редактирования ещё не реализован."
+        case "guestrag":
+            pass
         case None:
             # по умолчанию - режим gigachat
             return "Используйте /chat для начала общения с ИИ."
+
+
+async def handle_image(
+        request: Request,
+        image_path: str,
+        sender: dict
+) -> str | None:
+    """Обработка изображений."""
+    if user_modes[sender["user_id"]] == "edit":
+        return "Режим редактирования ещё не реализован."
+    return "Режим еще не работает"
+
+
+async def handle_file(
+        request: Request,
+        file_name: str,
+        sender: dict
+) -> str | None:
+    """Обработка файлов."""
+    if user_modes[sender["user_id"]] == "guestrag":
+        # сохраняем файл на диске
+        # сохраняем файл в векторную базу
+        return await save_to_vector_db(file_name)
+    return "Режим еще не работает"

@@ -10,16 +10,15 @@ from global_state import (
     WEBHOOK_SECRET,
     TRUSTED_WEBHOOK_IPS,
     RATE_LIMIT_PER_MINUTE,
-    TEMP_DIR,
+    ALLOWED_EXTENSIONS,
 )
 import bot_logic
 import db
-from utils import logger
+from utils import (
+    logger,
+    save_user_file,
+)
 from fastapi import Request
-import os
-from PIL import Image
-from io import BytesIO
-from datetime import datetime
 
 # ─── Rate limiting ───
 _rate_limit_store: dict[int, list[float]] = defaultdict(list)
@@ -138,33 +137,6 @@ async def delete_subscription(subscription_id: int = None) -> dict:
         return response.json()
 
 
-async def save_user_image(image_url: str, user_id: int) -> str | None:
-    """Скачивает и сохраняет изображение пользователя в temp/."""
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(image_url)
-            if response.status_code != 200:
-                logger.error(f"Ошибка скачивания: {response.status_code}")
-                return None
-
-            image = Image.open(BytesIO(response.content))
-
-            if image.mode in ("RGBA", "P"):
-                image = image.convert("RGB")
-
-            timestamp = int(datetime.now().timestamp() * 1000)
-            filename = f"photo_{user_id}_{timestamp}.jpg"
-            filepath = os.path.join(TEMP_DIR, filename)
-
-            image.save(filepath, "JPEG", quality=95)
-            logger.info(f"Сохранено изображение: {filepath}")
-            return filepath
-
-    except Exception as e:
-        logger.error(f"Ошибка сохранения изображения: {e}")
-        return None
-
-
 async def process_update(update: dict, request: Request) -> None:
     """Обработка одного обновления."""
     if update.get("update_type") != "message_created":
@@ -178,8 +150,25 @@ async def process_update(update: dict, request: Request) -> None:
     user_text = body.get("text", "")
 
     if sender.get("is_bot"):
-        return
+        return  # возврат если сообщение от бота
 
+    if not _check_rate_limit(user_id):  # вовзврат если слишком много запросов
+        logger.warning(f"Rate limit превышен для user_id={user_id}")
+        await send_message(
+            user_id, "Превышен лимит запросов. Попробуйте через минуту."
+        )
+        return
+    # создаем пользователя если его нет в базе
+    # (и базу с таблицами), все проверки уже есть в db
+    nickname = sender.get("name", f"user_{user_id}")
+    if await db.create_user(user_id, nickname):
+        logger.info(f"Создан пользователь: {nickname} (id={user_id})")
+
+    # ─── Обработка вложений ───
+    # если есть вложения
+    # то проверяем их на соответсвие типа выбранному режиму user_modes
+    # и сохраняем их в папке temp, если тип подходит под режим
+    # и отправляем на обработку в bot_logic
     attachments = body.get("attachments", [])
     attr_url = None
     for att in attachments:
@@ -195,30 +184,33 @@ async def process_update(update: dict, request: Request) -> None:
                 return
             break
         if att.get("type") == "image" and attr_url:
-            image_path = await save_user_image(attr_url, user_id)
+            # image_path = await save_user_image(attr_url, user_id)
             pass
-
-    if not user_id or not user_text:
-        logger.warning(f"Пропущено: user_id={user_id}, text={user_text}")
-        return
-
-    if not _check_rate_limit(user_id):
-        logger.warning(f"Rate limit превышен для user_id={user_id}")
-        await send_message(
-            user_id, "Превышен лимит запросов. Попробуйте через минуту."
-        )
-        return
+        if att.get("type") == "file" and attr_url:
+            filename = att.get("filename")
+            if not filename:
+                return
+            ext = filename.split('.')[-1].lower()
+            if ext not in ALLOWED_EXTENSIONS.get("guestrag"):
+                return
+            file_path = await save_user_file(attr_url, user_id, ext, "rag")
+            if not file_path:
+                logger.error(f"Не удалось загрузить файл: {filename}")
+                return
+            return await bot_logic.handle_file(request, file_path, sender)
 
     logger.info(f"Сообщение от {sender.get('name')}: {user_text}")
 
-    nickname = sender.get("name", f"user_{user_id}")
-    if await db.create_user(user_id, nickname):
-        logger.info(f"Создан пользователь: {nickname} (id={user_id})")
-
-    command_response = await bot_logic.handle_command(user_text, sender)
-    if command_response is not None:
-        await send_message(user_id, command_response)
+    if not user_id or not user_text:  # возврат если нет id или текста
+        logger.warning(f"Пропущено: user_id={user_id}, text={user_text}")
         return
+
+    # если команда то отправляем ее на обработку в bot_logic
+    if user_text.startswith("/"):
+        command_response = await bot_logic.handle_command(user_text, sender)
+        if command_response is not None:  # если есть ответ о выводим его
+            await send_message(user_id, command_response)
+            return
 
     try:
         reply_text = await bot_logic.handle_message(request, user_text, sender)

@@ -18,8 +18,8 @@ from sqlalchemy.orm import (
     Mapped,
     mapped_column,
     relationship,  # добавить
-    ForeignKey,   # тоже понадобится для внешнего ключа
 )
+from sqlalchemy import ForeignKey 
 from global_state import MAX_DB_PATH
 
 
@@ -42,12 +42,10 @@ class User(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(50), default="user")
     startdate: Mapped[datetime] = mapped_column(
-        DateTime,
-        server_default=func.now()
+        DateTime, server_default=func.now()
     )
     coindate: Mapped[datetime] = mapped_column(
-        DateTime,
-        server_default=func.now()
+        DateTime, server_default=func.now()
     )
     coins: Mapped[int] = mapped_column(Integer, default=0)
     giftcoins: Mapped[int] = mapped_column(Integer, default=0)
@@ -69,13 +67,12 @@ class Billing(Base):
     user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id"), index=True
     )
-    date: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now()
-    )
+    date: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     usermode: Mapped[str] = mapped_column(String(50))
     userprompt: Mapped[str] = mapped_column(String(255), default="")
     inccoins: Mapped[int] = mapped_column(Integer, default=0)
     deccoins: Mapped[int] = mapped_column(Integer, default=0)
+    giftcoins: Mapped[int] = mapped_column(Integer, default=0)
     balance: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str] = mapped_column(String(150), default="")
     user: Mapped["User"] = relationship(back_populates="billings")
@@ -91,6 +88,7 @@ async def create_database():
         # Создание системного пользователя с id=0, если он не существует
         async with AsyncSessionLocal() as db:
             from sqlalchemy import select
+
             result = await db.execute(select(User).where(User.id == 0))
             user = result.scalar_one_or_none()
 
@@ -113,6 +111,7 @@ async def check_user(userid: int) -> bool:
     try:
         async with AsyncSessionLocal() as db:
             from sqlalchemy import select
+
             result = await db.execute(select(User).where(User.id == userid))
             user = result.scalar_one_or_none()
             return user is not None
@@ -122,13 +121,13 @@ async def check_user(userid: int) -> bool:
 
 
 async def create_user(
-        userid: int,
-        nickname: str,
-        coins: int = 0,
-        giftcoins: int = 10,
-        note: str = None,
-        permission: int = 1,
-        check: bool = False,
+    userid: int,
+    nickname: str,
+    coins: int = 0,
+    giftcoins: int = 10,
+    note: str = None,
+    permission: int = 1,
+    check: bool = False,
 ) -> bool:
     """
     Создаёт пользователя в таблице users.
@@ -138,6 +137,7 @@ async def create_user(
     try:
         async with AsyncSessionLocal() as db:
             from sqlalchemy import select
+
             # Проверяем, не существует ли уже пользователь
             result = await db.execute(select(User).where(User.id == userid))
             existing_user = result.scalar_one_or_none()
@@ -173,6 +173,7 @@ async def get_user(userid: int) -> dict | None:
     try:
         async with AsyncSessionLocal() as db:
             from sqlalchemy import select
+
             result = await db.execute(select(User).where(User.id == userid))
             user = result.scalar_one_or_none()
 
@@ -187,6 +188,7 @@ async def get_user(userid: int) -> dict | None:
                     "giftcoins": user.giftcoins,
                     "note": user.note,
                     "permission": user.permission,
+                    "check": user.check,
                 }
             return None
 
@@ -195,11 +197,7 @@ async def get_user(userid: int) -> dict | None:
         return None
 
 
-async def add_coins(
-        userid: int,
-        coins: int = 0,
-        giftcoins: int = 0
-) -> bool:
+async def add_coins(userid: int, coins: int = 0, giftcoins: int = 0) -> bool:
     """
     Обновляет количество coins и giftcoins,
     и устанавливает coindate в текущее время
@@ -209,6 +207,7 @@ async def add_coins(
     try:
         async with AsyncSessionLocal() as db:
             from sqlalchemy import select
+
             result = await db.execute(select(User).where(User.id == userid))
             user = result.scalar_one_or_none()
 
@@ -233,6 +232,7 @@ async def add_billing(
     userprompt: str = "",
     inccoins: int = 0,
     deccoins: int = 0,
+    giftcoins: int = 0,
     notes: str = "",
 ) -> bool:
     """
@@ -242,13 +242,16 @@ async def add_billing(
     try:
         async with AsyncSessionLocal() as db:
             from sqlalchemy import select
+
             result = await db.execute(select(User).where(User.id == userid))
             user = result.scalar_one_or_none()
 
             if not user:
                 return False
 
-            balance = user.coins + user.giftcoins + inccoins - deccoins
+            balance = (
+                user.coins + user.giftcoins + inccoins + giftcoins - deccoins
+            )
 
             new_billing = Billing(
                 user_id=userid,
@@ -256,12 +259,14 @@ async def add_billing(
                 userprompt=userprompt,
                 inccoins=inccoins,
                 deccoins=deccoins,
+                giftcoins=giftcoins,
                 balance=balance,
                 notes=notes,
             )
             db.add(new_billing)
 
             user.coins += inccoins
+            user.giftcoins += giftcoins
             user.giftcoins -= deccoins
 
             await db.commit()
@@ -273,19 +278,20 @@ async def add_billing(
 
 
 async def get_billing_history(
-        userid: int,
-        limit: int = 50
-    ) -> list[dict] | None:
+    userid: int,
+    limit: int = 50,
+) -> list[dict] | None:
     """
     Возвращает историю billings для пользователя.
     """
     try:
         async with AsyncSessionLocal() as db:
             from sqlalchemy import select, desc
+
             result = await db.execute(
                 select(Billing)
                 .where(Billing.user_id == userid)
-                .order_by(desc(Billing.datetime))
+                .order_by(desc(Billing.date))
                 .limit(limit)
             )
             billings = result.scalars().all()
@@ -293,11 +299,12 @@ async def get_billing_history(
             return [
                 {
                     "id": b.id,
-                    "datetime": b.datetime,
+                    "date": b.date,
                     "usermode": b.usermode,
                     "userprompt": b.userprompt,
                     "inccoins": b.inccoins,
                     "deccoins": b.deccoins,
+                    "giftcoins": b.giftcoins,
                     "balance": b.balance,
                     "notes": b.notes,
                 }

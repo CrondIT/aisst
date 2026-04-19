@@ -1,7 +1,18 @@
 import logging
+import httpx
 import sys
+import os
+from PIL import Image
+from io import BytesIO
+from datetime import datetime
 from loguru import logger
-from global_state import PROXY_IP, PROXY_PORT, PROXY_USER, PROXY_PASSWORD
+from global_state import (
+    PROXY_IP,
+    PROXY_PORT,
+    PROXY_USER,
+    PROXY_PASSWORD,
+    TEMP_DIR,
+    )
 
 
 def get_socks_proxy_mount() -> "httpx.HTTPTransport | None":
@@ -27,7 +38,7 @@ def get_socks_proxy_mount() -> "httpx.HTTPTransport | None":
     return AsyncProxyTransport.from_url(proxy_url)
 
 
-# 1. Создаем класс, который перехватывает стандартные логи и отдает их в Loguru
+# 1. Создаем класс, который перехватывает стандартные логи
 class InterceptHandler(logging.Handler):
     def emit(self, record):
         # Получаем соответствующий уровень логирования в Loguru
@@ -78,7 +89,10 @@ def setup_logging():
         handlers=[
             {
                 "sink": sys.stdout,
-                "format": "<yellow>{time:HH:mm:ss}</yellow> | <level>{message}</level>",
+                "format": (
+                    "<yellow>{time:HH:mm:ss}</yellow> | "
+                    "<level>{message}</level>"
+                ),
             },
             {
                 "sink": "app_unified.log",
@@ -89,3 +103,61 @@ def setup_logging():
             },
         ]
     )
+
+
+async def save_user_image(image_url: str, user_id: int) -> str | None:
+    """Скачивает и сохраняет изображение пользователя в temp/."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(image_url)
+            if response.status_code != 200:
+                logger.error(f"Ошибка скачивания: {response.status_code}")
+                return None
+
+            image = Image.open(BytesIO(response.content))
+
+            if image.mode in ("RGBA", "P"):
+                image = image.convert("RGB")
+
+            timestamp = int(datetime.now().timestamp() * 1000)
+            filename = f"photo_{user_id}_{timestamp}.jpg"
+            filepath = os.path.join(TEMP_DIR, filename)
+
+            image.save(filepath, "JPEG", quality=95)
+            logger.info(f"Сохранено изображение: {filepath}")
+            return filepath
+
+    except Exception as e:
+        logger.error(f"Ошибка сохранения изображения: {e}")
+        return None
+
+
+async def save_user_file(
+        file_url: str, user_id: int, ext: str, default_name: str = "file"
+) -> str | None:
+    """Скачивает и сохраняет произвольный файл в temp/."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(file_url)
+            if response.status_code != 200:
+                logger.error(f"Ошибка скачивания: {response.status_code}")
+                return None
+
+            content = response.content
+            content_type = response.headers.get(
+                "Content-Type", ""
+            ).split(";")[0].strip()
+
+            timestamp = int(datetime.now().timestamp() * 1000)
+            filename = f"{default_name}_{user_id}_{timestamp}.{ext}"
+            filepath = os.path.join(TEMP_DIR, filename)
+
+            with open(filepath, "wb") as f:
+                f.write(content)
+
+            logger.info(f"Сохранён файл: {filepath} ({content_type})")
+            return filepath
+
+    except Exception as e:
+        logger.error(f"Ошибка сохранения файла: {e}")
+        return None

@@ -18,8 +18,15 @@ MAX_CONTEXT_MESSAGES = 5
 MAX_REF_IMAGES = 6  # Максимальное количество изображений для редактирования
 
 load_dotenv(override=True)
+# разрешенные расширения для разных режимов
+# ext in ALLOWED_EXTENSIONS.get("guestrag") -> True или False
+ALLOWED_EXTENSIONS = {
+    "guestrag": {"pdf"},
+    "file": {"pdf", "docx", "txt"},
+}
 
-TEMP_DIR = os.path.join(os.path.dirname(__file__), "temp")
+TEMP_DIR = os.path.join(os.path.dirname(__file__), os.getenv("TEMP_DIR", "temp"))
+GUEST_RAG_DIR = os.path.join(os.path.dirname(__file__), os.getenv("GUEST_RAG_DIR", "rag/guest"))
 
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
