@@ -33,7 +33,7 @@ async def get_loader_for_file(file_path: str):
         return None
 
 
-async def save_to_vector_db(file_path):
+async def save_to_vector_db(file_path, model_name: str = "GigaChat"):
     # 1. Загружаем документ
     loader = await get_loader_for_file(file_path)
     if loader is None:
@@ -52,13 +52,13 @@ async def save_to_vector_db(file_path):
         return
 
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50
+        chunk_size=1000,
+        chunk_overlap=200
     )
     chunks = text_splitter.split_documents(documents)
 
     # 3. Инициализируем эмбеддинги
-    embeddings = get_giga_embeddings()
+    embeddings = get_giga_embeddings(model_name)
     # 4. Создаем или обновляем базу
     if os.path.exists(GUEST_RAG_DIR) and os.path.exists(
         os.path.join(GUEST_RAG_DIR, "index.faiss")
