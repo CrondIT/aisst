@@ -112,5 +112,5 @@ async def handle_file(
     if user_modes[sender["user_id"]] == "guestrag":
         # сохраняем файл на диске
         # сохраняем файл в векторную базу
-        return await save_to_vector_db(file_name, "GigaChat-Pro")
+        return await save_to_vector_db(file_name, "EmbeddingsGigaR")
     return "Режим еще не работает"

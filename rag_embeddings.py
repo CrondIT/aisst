@@ -1,6 +1,7 @@
 """Модуль синглтона для GigaChat Embeddings."""
 
-from langchain_gigachat.embeddings import GigaChatEmbeddings
+# from langchain_gigachat.embeddings import GigaChatEmbeddings
+from langchain_community.embeddings.gigachat import GigaChatEmbeddings
 from global_state import GIGACHAT_API_KEY, GIGACHAT_SCOPE
 
 _giga_embeddings = None

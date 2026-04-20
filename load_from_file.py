@@ -42,7 +42,7 @@ async def save_to_vector_db(file_path, model_name: str = "GigaChat"):
     documents = loader.load()
 
     # 2. Нарезаем на чанки (ограниченный размер для GigaChat)
-    MAX_TOTAL_CHARS = 100_000
+    MAX_TOTAL_CHARS = 1000_000
     total_chars = sum(len(doc.page_content) for doc in documents)
     if total_chars > MAX_TOTAL_CHARS:
         print(

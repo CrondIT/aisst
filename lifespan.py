@@ -46,13 +46,16 @@ async def lifespan(app: FastAPI):
     # app.image_model = genai.GenerativeModel(MODELS['image'])
 
     # ─── GigaChat ───
-    giga_client = GigaChat(
-        credentials=GIGACHAT_API_KEY,
-        scope=GIGACHAT_SCOPE,
-        ca_bundle_file="russian_trusted_root_ca_pem.crt",
-    )
-
-    app.state.giga_client = GigaChatClient(giga_client)
+    if not GIGACHAT_API_KEY:
+        logger.warning("GIGACHAT_API_KEY не задан. Режим GigaChat недоступен.")
+        giga_client = None
+    else:
+        giga_client = GigaChat(
+            credentials=GIGACHAT_API_KEY,
+            scope=GIGACHAT_SCOPE,
+            ca_bundle_file="russian_trusted_root_ca_pem.crt",
+        )
+        app.state.giga_client = GigaChatClient(giga_client)
 
     # Startup
     if WEBHOOK_URL:
@@ -68,4 +71,5 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down, closing DB engine...")
     await db.engine.dispose()
     logger.info("Shutting down, closing giga_client...")
-    await giga_client.close()
+    if giga_client is not None:
+        await giga_client.close()
