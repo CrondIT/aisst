@@ -14,6 +14,7 @@ from global_state import (
 )
 import bot_logic
 import db
+import lifespan
 from utils import (
     logger,
     save_user_file,
@@ -143,6 +144,14 @@ async def process_update(update: dict, request: Request) -> None:
         return
 
     message = update.get("message", {})
+    message_created_at = message.get("created_at")
+    if (
+        message_created_at
+        and lifespan.SERVER_START_TIME
+        and message_created_at < lifespan.SERVER_START_TIME.isoformat()
+    ):
+        logger.info(f"Пропущено старое сообщение: {message.get('message_id')}")
+        return
     sender = message.get("sender", {})
     body = message.get("body", {})
 
@@ -196,8 +205,14 @@ async def process_update(update: dict, request: Request) -> None:
             file_path = await save_user_file(attr_url, user_id, ext, "rag")
             if not file_path:
                 logger.error(f"Не удалось загрузить файл: {filename}")
-                return
-            return await bot_logic.handle_file(request, file_path, sender)
+                return await send_message(
+                    user_id,
+                    f"Не удалось загрузить файл: {filename}"
+                )
+            return await send_message(
+                user_id,
+                await bot_logic.handle_file(request, file_path, sender)
+            )
 
     logger.info(f"Сообщение от {sender.get('name')}: {user_text}")
 

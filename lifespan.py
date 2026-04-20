@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from global_state import (
@@ -16,10 +17,15 @@ import db
 
 from utils import logger, setup_logging
 
+SERVER_START_TIME = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan-событие: замена устаревшему @app.on_event('startup')."""
+    global SERVER_START_TIME
+    SERVER_START_TIME = datetime.now(timezone.utc)
+
     # ─── Инициализация логирования (один раз при старте) ───
     setup_logging()
     # ─── Валидация безопасности ───

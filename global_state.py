@@ -25,8 +25,8 @@ ALLOWED_EXTENSIONS = {
     "file": {"pdf", "docx", "txt"},
 }
 
-TEMP_DIR = os.path.join(os.path.dirname(__file__), os.getenv("TEMP_DIR", "temp"))
-GUEST_RAG_DIR = os.path.join(os.path.dirname(__file__), os.getenv("GUEST_RAG_DIR", "rag/guest"))
+TEMP_DIR = os.getenv("TEMP_DIR", "temp")
+GUEST_RAG_DIR = os.getenv("GUEST_RAG_DIR", "rag/guest")
 
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
@@ -42,6 +42,7 @@ GIGACHAT_CLIENT_ID = os.getenv("GIGACHAT_CLIENT_ID")
 GIGACHAT_CLIENT_SECRET = os.getenv("GIGACHAT_CLIENT_SECRET")
 GIGACHAT_API_KEY = os.getenv("GIGACHAT_API_KEY")
 GIGACHAT_SCOPE = os.getenv("GIGACHAT_SCOPE") or "GIGACHAT_API_PERS"
+RUS_TRUSTED_ROOT_CA_PEM = os.getenv("RUS_TRUSTED_ROOT_CA_PEM")
 
 # Данные для подключения к OpenAI и Gemini
 # Получаем токены для разных режимов
