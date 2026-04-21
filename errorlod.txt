@@ -1,275 +1,82 @@
-2026-04-20 13:36:41.932 | INFO     | max_api:handle_webhook:251 - === Входящий webhook запрос ===
-2026-04-20 13:36:41.933 | INFO     | max_api:handle_webhook:252 - Method: POST, URL: http://ai.sst13.ru/webhook
-2026-04-20 13:36:41.933 | INFO     | max_api:handle_webhook:253 - Headers: {'host': 'ai.sst13.ru', 'x-real-ip': '89.221.230.115', 'x-forwarded-for': '89.221.230.115', 'x-forwarded-proto': 'https', 'connection': 'close', 'content-length': '962', 'x-max-bot-api-secret': 'aRwL136hkTRi6QoCff0949034HCMeTR93756OIeron3v0q900', 'user-agent': 'OneMe/0.1.10 Bot API', 'content-type': 'application/json; charset=UTF-8'}
-2026-04-20 13:36:41.933 | INFO     | max_api:handle_webhook:256 - Body: {"message":{"recipient":{"chat_id":144205101,"chat_type":"dialog","user_id":147967200},"timestamp":1776680791429,"body":{"mid":"mid.000000000898652d019daa6d6d85694e","seq":116436552347117902,"text":"","attachments":[{"payload":{"token":"f9LHodD0cOJWJGbYkoj44A17iFA639Z2FbV8_Zg6Q8Lm7-oFPiMza_rC7sxZgaCFBqSvRmkMxg2lO88ZKfOK","url":"https://fd.oneme.ru/getfile?sig=B0YkXQ9o5zz7PaRZwVStxiDZhjeW_Ud90JhZA_FnZ3o46tL7LX4sqHvoeXb2m9QmuaUweq2lGIYFtR9zlcAmqg&expires=1779272792331&clientType=3&id=3265234207&userId=147967200"},"filename":"Федеральный закон от 29 декабря 2012 г N 273 ФЗ Об образовании в Российской Феде (1).pdf","size":1063703,"type":"file"}]},"sender":{"user_id":4827597,"first_name":"Сергей","last_name":"Ведяйкин","is_bot":false,"last_activity_time":1776680792000,"name":"Сергей Ведяйкин"}},"timestamp":1776680791429,"user_locale":"ru","update_type":"message_created"}
-2026-04-20 13:36:41.934 | INFO     | max_api:handle_webhook:260 - X-Max-Bot-Api-Secret header: 'aRwL136hkTRi6QoCff0949034HCMeTR93756OIeron3v0q900'
-2026-04-20 13:36:41.934 | INFO     | max_api:handle_webhook:271 - Webhook payload: message_created
-2026-04-20 13:36:41.936 | INFO     | db:create_user:145 - Пользователь с userid=4827597 уже есть в базе.
-2026-04-20 13:36:41.980 | INFO     | httpx._client:_send_single_request:1740 - HTTP Request: GET https://fd.oneme.ru/getfile?sig=B0YkXQ9o5zz7PaRZwVStxiDZhjeW_Ud90JhZA_FnZ3o46tL7LX4sqHvoeXb2m9QmuaUweq2lGIYFtR9zlcAmqg&expires=1779272792331&clientType=3&id=3265234207&userId=147967200 "HTTP/1.1 200 OK"
-2026-04-20 13:36:41.999 | INFO     | utils:save_user_file:158 - Сохранён файл: /root/aisst/temp/rag_4827597_1776681401998.pdf (application/octet-stream)
-2026-04-20 13:36:49.838 | INFO     | httpx._client:_send_single_request:1025 - HTTP Request: POST https://gigachat.devices.sberbank.ru/api/v1/embeddings "HTTP/1.1 413 Request Entity Too Large"
-2026-04-20 13:36:49.839 | INFO     | uvicorn.protocols.http.httptools_impl:send:484 -  - "POST /webhook HTTP/1.0" 500
-2026-04-20 13:36:49.839 | ERROR    | uvicorn.protocols.http.httptools_impl:run_asgi:425 - Exception in ASGI application
+import hashlib
+from pathlib import Path
+import chromadb
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-Traceback (most recent call last):
+# 1. Инициализация базы (локально, экономно для RAM)
+client = chromadb.PersistentClient(path="./vector_storage")
+collection = client.get_or_create_collection(name="user_knowledge_base")
 
-  File "/root/aisst/.venv/bin/gunicorn", line 8, in <module>
-    sys.exit(run())
-    │   │    └ <function run at 0x731f2a9c4400>
-    │   └ <built-in function exit>
-    └ <module 'sys' (built-in)>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gunicorn/app/wsgiapp.py", line 66, in run
-    WSGIApplication("%(prog)s [OPTIONS] [APP_MODULE]", prog=prog).run()
-    │                                                       └ None
-    └ <class 'gunicorn.app.wsgiapp.WSGIApplication'>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gunicorn/app/base.py", line 235, in run
-    super().run()
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gunicorn/app/base.py", line 71, in run
-    Arbiter(self).run()
-    │       └ <gunicorn.app.wsgiapp.WSGIApplication object at 0x731f2a981370>
-    └ <class 'gunicorn.arbiter.Arbiter'>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gunicorn/arbiter.py", line 223, in run
-    self.manage_workers()
-    │    └ <function Arbiter.manage_workers at 0x731f2a152980>
-    └ <gunicorn.arbiter.Arbiter object at 0x731f2a5418e0>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gunicorn/arbiter.py", line 661, in manage_workers
-    self.spawn_workers()
-    │    └ <function Arbiter.spawn_workers at 0x731f2a152ac0>
-    └ <gunicorn.arbiter.Arbiter object at 0x731f2a5418e0>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gunicorn/arbiter.py", line 748, in spawn_workers
-    self.spawn_worker()
-    │    └ <function Arbiter.spawn_worker at 0x731f2a152a20>
-    └ <gunicorn.arbiter.Arbiter object at 0x731f2a5418e0>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gunicorn/arbiter.py", line 713, in spawn_worker
-    worker.init_process()
-    │      └ <function Worker.init_process at 0x731f29574180>
-    └ <uvicorn.workers.UvicornWorker object at 0x731f2982a7e0>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gunicorn/workers/base.py", line 144, in init_process
-    self.run()
-    │    └ <function UvicornWorker.run at 0x731f29574860>
-    └ <uvicorn.workers.UvicornWorker object at 0x731f2982a7e0>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/uvicorn/workers.py", line 104, in run
-    return asyncio_run(self._serve(), loop_factory=self.config.get_loop_factory())
-           │           │    │                      │    │      └ <function Config.get_loop_factory at 0x731f2975fe20>
-           │           │    │                      │    └ <uvicorn.config.Config object at 0x731f298297f0>
-           │           │    │                      └ <uvicorn.workers.UvicornWorker object at 0x731f2982a7e0>
-           │           │    └ <function UvicornWorker._serve at 0x731f295747c0>
-           │           └ <uvicorn.workers.UvicornWorker object at 0x731f2982a7e0>
-           └ <function run at 0x731f299ad8a0>
-  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
-    return runner.run(main)
-           │      │   └ <coroutine object UvicornWorker._serve at 0x731f1ecdf510>
-           │      └ <function Runner.run at 0x731f29867e20>
-           └ <asyncio.runners.Runner object at 0x731f299399d0>
-  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
-    return self._loop.run_until_complete(task)
-           │    │     │                  └ <Task pending name='Task-1' coro=<UvicornWorker._serve() running at /root/aisst/.venv/lib/python3.12/site-packages/uvicorn/wo...
-           │    │     └ <cyfunction Loop.run_until_complete at 0x731f1ed13880>
-           │    └ <uvloop.Loop running=True closed=False debug=False>
-           └ <asyncio.runners.Runner object at 0x731f299399d0>
-> File "/root/aisst/.venv/lib/python3.12/site-packages/uvicorn/protocols/http/httptools_impl.py", line 420, in run_asgi
-    result = await app(  # type: ignore[func-returns-value]
-                   └ <uvicorn.middleware.proxy_headers.ProxyHeadersMiddleware object at 0x731f1eb4ac60>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
-    return await self.app(scope, receive, send)
-                 │    │   │      │        └ <bound method RequestResponseCycle.send of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f023...
-                 │    │   │      └ <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f...
-                 │    │   └ {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.0', 'server': ('/tmp/fastapi.sock', No...
-                 │    └ <fastapi.applications.FastAPI object at 0x731f1ec373e0>
-                 └ <uvicorn.middleware.proxy_headers.ProxyHeadersMiddleware object at 0x731f1eb4ac60>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/fastapi/applications.py", line 1163, in __call__
-    await super().__call__(scope, receive, send)
-                           │      │        └ <bound method RequestResponseCycle.send of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f023...
-                           │      └ <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f...
-                           └ {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.0', 'server': ('/tmp/fastapi.sock', No...
-  File "/root/aisst/.venv/lib/python3.12/site-packages/starlette/applications.py", line 90, in __call__
-    await self.middleware_stack(scope, receive, send)
-          │    │                │      │        └ <bound method RequestResponseCycle.send of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f023...
-          │    │                │      └ <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f...
-          │    │                └ {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.0', 'server': ('/tmp/fastapi.sock', No...
-          │    └ <starlette.middleware.errors.ServerErrorMiddleware object at 0x731f1e88dac0>
-          └ <fastapi.applications.FastAPI object at 0x731f1ec373e0>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/starlette/middleware/errors.py", line 186, in __call__
-    raise exc
-  File "/root/aisst/.venv/lib/python3.12/site-packages/starlette/middleware/errors.py", line 164, in __call__
-    await self.app(scope, receive, _send)
-          │    │   │      │        └ <function ServerErrorMiddleware.__call__.<locals>._send at 0x731f16169e40>
-          │    │   │      └ <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f...
-          │    │   └ {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.0', 'server': ('/tmp/fastapi.sock', No...
-          │    └ <starlette.middleware.exceptions.ExceptionMiddleware object at 0x731f1e88da90>
-          └ <starlette.middleware.errors.ServerErrorMiddleware object at 0x731f1e88dac0>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
-    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
-          │                            │    │    │     │      │        └ <function ServerErrorMiddleware.__call__.<locals>._send at 0x731f16169e40>
-          │                            │    │    │     │      └ <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f...
-          │                            │    │    │     └ {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.0', 'server': ('/tmp/fastapi.sock', No...
-          │                            │    │    └ <starlette.requests.Request object at 0x731f16f01070>
-          │                            │    └ <fastapi.middleware.asyncexitstack.AsyncExitStackMiddleware object at 0x731f1e88da60>
-          │                            └ <starlette.middleware.exceptions.ExceptionMiddleware object at 0x731f1e88da90>
-          └ <function wrap_app_handling_exceptions at 0x731f2890f880>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
-    raise exc
-  File "/root/aisst/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
-    await app(scope, receive, sender)
-          │   │      │        └ <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x731f1c0b1440>
-          │   │      └ <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f...
-          │   └ {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.0', 'server': ('/tmp/fastapi.sock', No...
-          └ <fastapi.middleware.asyncexitstack.AsyncExitStackMiddleware object at 0x731f1e88da60>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
-    await self.app(scope, receive, send)
-          │    │   │      │        └ <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x731f1c0b1440>
-          │    │   │      └ <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f...
-          │    │   └ {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.0', 'server': ('/tmp/fastapi.sock', No...
-          │    └ <fastapi.routing.APIRouter object at 0x731f1eb48080>
-          └ <fastapi.middleware.asyncexitstack.AsyncExitStackMiddleware object at 0x731f1e88da60>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/starlette/routing.py", line 660, in __call__
-    await self.middleware_stack(scope, receive, send)
-          │    │                │      │        └ <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x731f1c0b1440>
-          │    │                │      └ <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f...
-          │    │                └ {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.0', 'server': ('/tmp/fastapi.sock', No...
-          │    └ <bound method Router.app of <fastapi.routing.APIRouter object at 0x731f1eb48080>>
-          └ <fastapi.routing.APIRouter object at 0x731f1eb48080>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/starlette/routing.py", line 680, in app
-    await route.handle(scope, receive, send)
-          │     │      │      │        └ <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x731f1c0b1440>
-          │     │      │      └ <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f...
-          │     │      └ {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.0', 'server': ('/tmp/fastapi.sock', No...
-          │     └ <function Route.handle at 0x731f28940d60>
-          └ APIRoute(path='/webhook', name='webhook', methods=['POST'])
-  File "/root/aisst/.venv/lib/python3.12/site-packages/starlette/routing.py", line 276, in handle
-    await self.app(scope, receive, send)
-          │    │   │      │        └ <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x731f1c0b1440>
-          │    │   │      └ <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f...
-          │    │   └ {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.0', 'server': ('/tmp/fastapi.sock', No...
-          │    └ <function request_response.<locals>.app at 0x731f1eb58220>
-          └ APIRoute(path='/webhook', name='webhook', methods=['POST'])
-  File "/root/aisst/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 134, in app
-    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
-          │                            │    │        │      │        └ <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x731f1c0b1440>
-          │                            │    │        │      └ <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f...
-          │                            │    │        └ {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.0', 'server': ('/tmp/fastapi.sock', No...
-          │                            │    └ <starlette.requests.Request object at 0x731f16f02e40>
-          │                            └ <function request_response.<locals>.app.<locals>.app at 0x731f1c0b13a0>
-          └ <function wrap_app_handling_exceptions at 0x731f2890f880>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
-    raise exc
-  File "/root/aisst/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
-    await app(scope, receive, sender)
-          │   │      │        └ <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x731f1c0b0fe0>
-          │   │      └ <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x731f16f...
-          │   └ {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.0', 'server': ('/tmp/fastapi.sock', No...
-          └ <function request_response.<locals>.app.<locals>.app at 0x731f1c0b13a0>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 120, in app
-    response = await f(request)
-                     │ └ <starlette.requests.Request object at 0x731f16f02e40>
-                     └ <function get_request_handler.<locals>.app at 0x731f1eb582c0>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 674, in app
-    raw_response = await run_endpoint_function(
-                         └ <function run_endpoint_function at 0x731f28942d40>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 328, in run_endpoint_function
-    return await dependant.call(**values)
-                 │         │      └ {'request': <starlette.requests.Request object at 0x731f16f02e40>}
-                 │         └ <function webhook at 0x731f1eb02f20>
-                 └ Dependant(path_params=[], query_params=[], header_params=[], cookie_params=[], body_params=[], dependencies=[], name=None, ca...
+def get_file_hash(file_path):
+    """Считает хеш файла, не загружая его целиком в память."""
+    hash_sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_sha256.update(chunk)
+    return hash_sha256.hexdigest()
 
-  File "/root/aisst/routers.py", line 65, in webhook
-    await max_api.process_update(data, request)
-          │       │              │     └ <starlette.requests.Request object at 0x731f16f02e40>
-          │       │              └ {'message': {'recipient': {'chat_id': 144205101, 'chat_type': 'dialog', 'user_id': 147967200}, 'timestamp': 1776680791429, 'b...
-          │       └ <function process_update at 0x731f1eb028e0>
-          └ <module 'max_api' from '/root/aisst/max_api.py'>
+def check_in_vector_db(file_id):
+    """Проверяет, есть ли хотя бы один чанк с таким file_id."""
+    results = collection.get(
+        where={"file_id": file_id},
+        limit=1,
+        include=[] # Важно: не грузим данные, только проверяем наличие
+    )
+    return len(results['ids']) > 0
 
-  File "/root/aisst/max_api.py", line 200, in process_update
-    return await bot_logic.handle_file(request, file_path, sender)
-                 │         │           │        │          └ {'user_id': 4827597, 'first_name': 'Сергей', 'last_name': 'Ведяйкин', 'is_bot': False, 'last_activity_time': 1776680792000, '...
-                 │         │           │        └ '/root/aisst/temp/rag_4827597_1776681401998.pdf'
-                 │         │           └ <starlette.requests.Request object at 0x731f16f02e40>
-                 │         └ <function handle_file at 0x731f1ec9cf40>
-                 └ <module 'bot_logic' from '/root/aisst/bot_logic.py'>
+async def process_file_to_db(file_path, user_id):
+    """Основная функция: Хеш -> Проверка -> Загрузка -> Сплиттер -> Сохранение."""
+    
+    # Шаг 1: Быстрая проверка на дубликат по хешу
+    file_id = get_file_hash(file_path)
+    if check_in_vector_db(file_id):
+        return f"Файл уже есть в вашей базе (ID: {file_id[:8]}...)"
 
-  File "/root/aisst/bot_logic.py", line 115, in handle_file
-    return await save_to_vector_db(file_name, "EmbeddingsGigaR")
-                 │                 └ '/root/aisst/temp/rag_4827597_1776681401998.pdf'
-                 └ <function save_to_vector_db at 0x731f1ec59300>
+    # Шаг 2: Подбор лоадера и извлечение текста
+    loader = await get_loader_for_file(file_path) # Ваша функция из прошлых сообщений
+    if isinstance(loader, str): return loader # Ошибка формата
+    
+    try:
+        docs = loader.load()
+        raw_text = "\n".join([doc.page_content for doc in docs])
+    except Exception as e:
+        return f"Ошибка при чтении файла: {e}"
 
-  File "/root/aisst/load_from_file.py", line 76, in save_to_vector_db
-    vector_db = FAISS.from_documents(chunks, embeddings)
-                │     │              │       └ GigaChatEmbeddings(credentials='MDE5YzlmZGItNjM0OS03Y2M3LWE5NTYtZjZkZDhjOWUxZGM0OjBjYjMzNjVmLTE1NTgtNDU3OC1iZDQ4LTY3ZWRjYzVhN...
-                │     │              └ [Document(metadata={'producer': 'Synopse PDF engine 1.18.6395', 'creator': 'Документ экспортирован из системы ГАРАНТ', 'creat...
-                │     └ <classmethod(<function VectorStore.from_documents at 0x731f1ec5b740>)>
-                └ <class 'langchain_community.vectorstores.faiss.FAISS'>
+    # Шаг 3: Нарезка текста на чанки
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=100
+    )
+    chunks = text_splitter.split_text(raw_text)
 
-  File "/root/aisst/.venv/lib/python3.12/site-packages/langchain_core/vectorstores/base.py", line 814, in from_documents
-    return cls.from_texts(texts, embedding, metadatas=metadatas, **kwargs)
-           │   │          │      │                    │            └ {}
-           │   │          │      │                    └ [{'producer': 'Synopse PDF engine 1.18.6395', 'creator': 'Документ экспортирован из системы ГАРАНТ', 'creationdate': '2026-04...
-           │   │          │      └ GigaChatEmbeddings(credentials='MDE5YzlmZGItNjM0OS03Y2M3LWE5NTYtZjZkZDhjOWUxZGM0OjBjYjMzNjVmLTE1NTgtNDU3OC1iZDQ4LTY3ZWRjYzVhN...
-           │   │          └ ['Федеральный закон от 29 декабря 2012 г. N 273-ФЗ "Об образовании в Российской Федерации" (с\n20.04.2026 Система ГАРАНТ 1\nФ...
-           │   └ <classmethod(<function FAISS.from_texts at 0x731f1ec9e0c0>)>
-           └ <class 'langchain_community.vectorstores.faiss.FAISS'>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/langchain_community/vectorstores/faiss.py", line 1043, in from_texts
-    embeddings = embedding.embed_documents(texts)
-                 │         │               └ ['Федеральный закон от 29 декабря 2012 г. N 273-ФЗ "Об образовании в Российской Федерации" (с\n20.04.2026 Система ГАРАНТ 1\nФ...
-                 │         └ <function GigaChatEmbeddings.embed_documents at 0x731f1eb02520>
-                 └ GigaChatEmbeddings(credentials='MDE5YzlmZGItNjM0OS03Y2M3LWE5NTYtZjZkZDhjOWUxZGM0OjBjYjMzNjVmLTE1NTgtNDU3OC1iZDQ4LTY3ZWRjYzVhN...
-  File "/root/aisst/.venv/lib/python3.12/site-packages/langchain_gigachat/embeddings/gigachat.py", line 40, in embed_documents
-    response = self._client.embeddings(texts=texts, **self._get_embed_kwargs())
-               │    │       │                │        │    └ <function GigaChatEmbeddings._get_embed_kwargs at 0x731f1eb023e0>
-               │    │       │                │        └ GigaChatEmbeddings(credentials='MDE5YzlmZGItNjM0OS03Y2M3LWE5NTYtZjZkZDhjOWUxZGM0OjBjYjMzNjVmLTE1NTgtNDU3OC1iZDQ4LTY3ZWRjYzVhN...
-               │    │       │                └ ['Федеральный закон от 29 декабря 2012 г. N 273-ФЗ "Об образовании в Российской Федерации" (с\n20.04.2026 Система ГАРАНТ 1\nФ...
-               │    │       └ <function GigaChatSyncClient.embeddings at 0x731f280de2a0>
-               │    └ <gigachat.client.GigaChat object at 0x731f1d808890>
-               └ GigaChatEmbeddings(credentials='MDE5YzlmZGItNjM0OS03Y2M3LWE5NTYtZjZkZDhjOWUxZGM0OjBjYjMzNjVmLTE1NTgtNDU3OC1iZDQ4LTY3ZWRjYzVhN...
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gigachat/retry.py", line 53, in wrapper
-    return func(self, *args, **kwargs)
-           │    │      │       └ {'texts': ['Федеральный закон от 29 декабря 2012 г. N 273-ФЗ "Об образовании в Российской Федерации" (с\n20.04.2026 Система Г...
-           │    │      └ ()
-           │    └ <gigachat.client.GigaChat object at 0x731f1d808890>
-           └ <function GigaChatSyncClient.embeddings at 0x731f280de200>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gigachat/authentication.py", line 72, in wrapper
-    return func(self, *args, **kwargs)
-           │    │      │       └ {'texts': ['Федеральный закон от 29 декабря 2012 г. N 273-ФЗ "Об образовании в Российской Федерации" (с\n20.04.2026 Система Г...
-           │    │      └ ()
-           │    └ <gigachat.client.GigaChat object at 0x731f1d808890>
-           └ <function GigaChatSyncClient.embeddings at 0x731f280de160>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gigachat/client.py", line 353, in embeddings
-    return embeddings.embeddings_sync(self._client, access_token=self.token, input_=texts, model=model)
-           │          │               │    │                     │    │             │            └ 'EmbeddingsGigaR'
-           │          │               │    │                     │    │             └ ['Федеральный закон от 29 декабря 2012 г. N 273-ФЗ "Об образовании в Российской Федерации" (с\n20.04.2026 Система ГАРАНТ 1\nФ...
-           │          │               │    │                     │    └ <property object at 0x731f280cd300>
-           │          │               │    │                     └ <gigachat.client.GigaChat object at 0x731f1d808890>
-           │          │               │    └ <property object at 0x731f280cd3f0>
-           │          │               └ <gigachat.client.GigaChat object at 0x731f1d808890>
-           │          └ <function embeddings_sync at 0x731f281e0fe0>
-           └ <module 'gigachat.api.embeddings' from '/root/aisst/.venv/lib/python3.12/site-packages/gigachat/api/embeddings.py'>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gigachat/api/embeddings.py", line 36, in embeddings_sync
-    return execute_request_sync(client, kwargs, Embeddings)
-           │                    │       │       └ <class 'gigachat.models.embeddings.Embeddings'>
-           │                    │       └ {'method': 'POST', 'url': '/embeddings', 'content': '{"input": ["Федеральный закон от 29 декабря 2012 г. N 273-ФЗ \\"Об образ...
-           │                    └ <httpx.Client object at 0x731f15426780>
-           └ <function execute_request_sync at 0x731f2811f240>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gigachat/api/utils.py", line 154, in execute_request_sync
-    return build_response(response, model_class)
-           │              │         └ <class 'gigachat.models.embeddings.Embeddings'>
-           │              └ <Response [413 Request Entity Too Large]>
-           └ <function build_response at 0x731f2811f1a0>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gigachat/api/utils.py", line 148, in build_response
-    _raise_for_status(response.url, response.status_code, response.content, response.headers)
-    │                 │        │    │        │            │        │        │        └ Headers({'server': 'SynGX', 'date': 'Mon, 20 Apr 2026 10:36:49 GMT', 'content-type': 'text/html', 'content-length': '176', 'c...
-    │                 │        │    │        │            │        │        └ <Response [413 Request Entity Too Large]>
-    │                 │        │    │        │            │        └ <property object at 0x731f28693240>
-    │                 │        │    │        │            └ <Response [413 Request Entity Too Large]>
-    │                 │        │    │        └ 413
-    │                 │        │    └ <Response [413 Request Entity Too Large]>
-    │                 │        └ <property object at 0x731f286931f0>
-    │                 └ <Response [413 Request Entity Too Large]>
-    └ <function _raise_for_status at 0x731f2811ef20>
-  File "/root/aisst/.venv/lib/python3.12/site-packages/gigachat/api/utils.py", line 113, in _raise_for_status
-    raise RequestEntityTooLargeError(url, status_code, content, headers)
-          │                          │    │            │        └ Headers({'server': 'SynGX', 'date': 'Mon, 20 Apr 2026 10:36:49 GMT', 'content-type': 'text/html', 'content-length': '176', 'c...
-          │                          │    │            └ b'<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h...
-          │                          │    └ 413
-          │                          └ URL('https://gigachat.devices.sberbank.ru/api/v1/embeddings')
-          └ <class 'gigachat.exceptions.RequestEntityTooLargeError'>
+    # Шаг 4: Подготовка метаданных и ID
+    ids = [f"{file_id}_{i}" for i in range(len(chunks))]
+    metadatas = [
+        {
+            "file_id": file_id, 
+            "user_id": user_id, 
+            "filename": Path(file_path).name
+        } for _ in range(len(chunks))
+    ]
 
-gigachat.exceptions.RequestEntityTooLargeError: 413 https://gigachat.devices.sberbank.ru/api/v1/embeddings: b'<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>SynGX</center>\r\n</body>\r\n</html>\r\n', Headers({'server': 'SynGX', 'date': 'Mon, 20 Apr 2026 10:36:49 GMT', 'content-type': 'text/html', 'content-length': '176', 'connection': 'close', 'allow': 'GET, POST', 'strict-transport-security': 'max-age=31536000; includeSubDomains'})
+    # Шаг 5: Сохранение в базу
+    collection.add(
+        ids=ids,
+        documents=chunks,
+        metadatas=metadatas
+    )
+
+    return f"Успешно! Файл разбит на {len(chunks)} частей и добавлен в базу."
+
+# Функция удаления для пользователя
+def delete_user_file(file_id, user_id):
+    """Удаляет все части файла, проверяя, что он принадлежит пользователю."""
+    collection.delete(
+        where={
+            "$and": [
+                {"file_id": file_id},
+                {"user_id": user_id}
+            ]
+        }
+    )
+    return "Файл удален."

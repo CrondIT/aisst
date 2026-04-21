@@ -5,59 +5,45 @@ from langchain_community.document_loaders import (
     TextLoader,
 )
 import os
-import json
-import hashlib
-import asyncio
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from langchain_community.vectorstores import FAISS
+import hashlib
+
+# from langchain_community.vectorstores import FAISS
+from langchain_chroma import Chroma
 from global_state import GUEST_RAG_DIR
 from rag_embeddings import get_giga_embeddings
 from utils import logger
 
-ADDED_FILES_PATH = os.path.join(GUEST_RAG_DIR, "added_files.json")
 
-
-def _load_added_files() -> dict:
-    if os.path.exists(ADDED_FILES_PATH):
-        with open(ADDED_FILES_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-
-def _save_added_files(files: dict):
-    os.makedirs(GUEST_RAG_DIR, exist_ok=True)
-    with open(ADDED_FILES_PATH, "w", encoding="utf-8") as f:
-        json.dump(files, f, ensure_ascii=False, indent=2)
-
-
-def _get_file_hash(file_path: str) -> str:
-    hasher = hashlib.md5()
+def get_file_hash(file_path):
+    hash_sha256 = hashlib.sha256()
     with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            hasher.update(chunk)
-    return hasher.hexdigest()
+        # Читаем частями, чтобы не забить RAM (важно для слабого сервера)
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_sha256.update(chunk)
+    return hash_sha256.hexdigest()
 
 
-def _is_file_already_added(file_path: str) -> bool:
-    added_files = _load_added_files()
-    file_hash = _get_file_hash(file_path)
-    return file_hash in added_files
+def check_in_vector_db(file_id, collection):
+    """
+    Проверяет наличие файла по его уникальному хешу (file_id).
+    collection — это объект коллекции ChromaDB.
+    """
+    # Ищем запись по ID. Параметр include=[] отключает загрузку
+    # документов и эмбеддингов, что экономит RAM.
+    existing = collection.get(
+        ids=[file_id],
+        include=[]
+    )
 
-
-def _mark_file_as_added(file_path: str):
-    added_files = _load_added_files()
-    file_hash = _get_file_hash(file_path)
-    file_name = os.path.basename(file_path)
-    added_files[file_hash] = {"name": file_name}
-    _save_added_files(added_files)
+    # Если список IDs не пуст — файл уже в базе
+    return len(existing['ids']) > 0
 
 
 async def get_loader_for_file(file_path: str):
     path = Path(file_path)
-    # Приводим к нижнему регистру, чтобы .PDF и .pdf работали одинаково
     ext = path.suffix.lower()
-
     loaders = {
         ".pdf": PyPDFLoader,
         "pdf": PyPDFLoader,
@@ -65,37 +51,49 @@ async def get_loader_for_file(file_path: str):
         ".doc": Docx2txtLoader,
         ".txt": TextLoader,
     }
-
-    if ext in loaders:
-        loader_class = loaders[ext]
-        return loader_class(file_path)
-    else:
+    if ext not in loaders:
         logger.warning(f"Формат {ext} не поддерживается")
-        return f"Формат {ext} не поддерживается"
+        return None
+    loader_class = loaders[ext]
+    try:
+        return loader_class(file_path)
+    except Exception as e:
+        error_type = type(e).__name__
+        error_msg = str(e).lower()
+
+        if "encrypt" in error_msg or "password" in error_msg:
+            logger.error(f"PDF защищён паролем: {file_path}")
+        elif "pdf" in error_type.lower():
+            logger.error(f"PDF повреждён или ошибка чтения: {file_path}")
+        elif "docx" in error_type.lower():
+            logger.error(f"DOCX повреждён: {file_path}")
+        else:
+            logger.error(f"Ошибка загрузки {file_path}: {error_type}")
+        return None
 
 
 async def save_to_vector_db(file_path, model_name: str = "GigaChat"):
-    # Проверяем, не добавлен ли уже этот файл
-    if _is_file_already_added(file_path):
-        logger.info(f"Файл уже добавлен: {file_path}")
-        return "Этот файл уже был добавлен ранее."
+    # Считаем хеш файла
+    file_id = get_file_hash(file_path)
+    # Проверяем, есть ли файл в базе
+    if not check_in_vector_db(file_id):
+        # Загружаем документ
+        loader = await get_loader_for_file(file_path)
+    else:
+        logger.info(f"Файл уже есть в базе: {file_path}")
+        return f"Файл уже есть в базе: {file_path}"
 
-    # 1. Загружаем документ
-    loader = await get_loader_for_file(file_path)
     if loader is None:
         logger.warning(f"Формат не поддерживается: {file_path}")
         return f"Формат не поддерживается: {file_path}"
-    documents = loader.load()
 
-    # 2. Нарезаем на чанки (ограниченный размер для GigaChat)
-    # MAX_TOTAL_CHARS = 1000_000
+    try:
+        documents = loader.load()
+    except Exception as e:
+        logger.error(f"Не удалось извлечь текст из {file_path}: {e}")
+        return f"Не удалось извлечь текст из {file_path}: {e}"
+
     total_chars = sum(len(doc.page_content) for doc in documents)
-    # if total_chars > MAX_TOTAL_CHARS:
-    #    print(
-    #        f"Файл слишком большой: {total_chars} символов."
-    #        f" Максимум: {MAX_TOTAL_CHARS}"
-    #   )
-    #    return
 
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=800,
@@ -115,32 +113,31 @@ async def save_to_vector_db(file_path, model_name: str = "GigaChat"):
         texts = [chunk.page_content for chunk in batch]
         embeddings_list = embeddings.embed_documents(texts)
         all_embeddings.extend(embeddings_list)
-        logger.info(f"Обработано {min(i + batch_size, len(chunks))}/{len(chunks)} чанков")
+        logger.info(
+            f"Обработано {min(i + batch_size, len(chunks))}"
+            f"/{len(chunks)} чанков"
+        )
 
     logger.info(f"Получено {len(all_embeddings)} эмбеддингов")
 
     # 5. Создаем или обновляем базу
-    if os.path.exists(GUEST_RAG_DIR) and os.path.exists(
-        os.path.join(GUEST_RAG_DIR, "index.faiss")
-    ):
-        vector_db = FAISS.load_local(
-            GUEST_RAG_DIR,
-            embeddings,
-            allow_dangerous_deserialization=True
+    if os.path.exists(GUEST_RAG_DIR) and os.listdir(GUEST_RAG_DIR):
+        vector_db = Chroma(
+            persist_directory=GUEST_RAG_DIR,
+            embedding_function=embeddings
         )
-        vector_db.add_embeddings(list(zip(chunks, all_embeddings)))
-        logger.info(f"Добавлено {len(chunks)} фрагментов в существующую базу.")
+        vector_db.add_documents(documents=chunks)
+        logger.info(
+            f"Добавлено {len(chunks)} фрагментов в существующую базу."
+        )
     else:
         os.makedirs(GUEST_RAG_DIR, exist_ok=True)
-        vector_db = FAISS.from_embeddings(chunks, embeddings, all_embeddings)
+        vector_db = Chroma.from_documents(
+            documents=chunks,
+            embedding=embeddings,
+            persist_directory=GUEST_RAG_DIR
+        )
         logger.info(f"Создана новая база с {len(chunks)} фрагментами.")
-
-    # 5. Сохраняем локально на диск
-    vector_db.save_local(GUEST_RAG_DIR)
-    logger.info(f"База успешно сохранена в папку: {GUEST_RAG_DIR}")
-
-    # 6. Запоминаем, что файл добавлен
-    _mark_file_as_added(file_path)
 
     return (
         f"Файл добавлен в базу. Символов: {total_chars}, "
