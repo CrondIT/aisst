@@ -49,9 +49,6 @@ def _verify_admin(
 @router.get("/")
 async def index(request: Request):
     context = {}
-    context['test'] = "ьесьлвая строка"
-    context['templates'] = request.app.templates
-    context['static'] = request.app.static_dir
     return request.app.templates.TemplateResponse(
         request,
         "index.html",
@@ -187,6 +184,11 @@ async def send_command(request: Request):
 
     command = data.get("command", "")
     user_id = data.get("user_id")
+
+    print("command, user_id:", command, user_id)
+
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
 
     if not command:
         raise HTTPException(status_code=400, detail="Command is required")

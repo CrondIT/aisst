@@ -6,45 +6,92 @@
 <div class="menu-container">
     <h1 class="menu-title">Выберите режим</h1>
 
-    <div class="menu-buttons">
-        <a href="#" class="menu-btn" onclick="sendCommand('/gigachat'); return false;">
+    <div id="status" class="alert alert-info mb-3" style="display: none;"></div>
+
+    <div class="d-grid gap-2 d-md-block">
+        <button type="button" class="btn btn-success" onclick="sendCommand('/gigachat'); return false;">
             <i class="fa fa-address-book" aria-hidden="true"></i> Чат с ИИ
-        </a>
-        <a href="#" class="menu-btn" onclick="sendCommand('/file'); return false;">
+        </button>
+        <button type="button"  class="btn btn-success" onclick="sendCommand('/file'); return false;">
             <i class="fa fa-file-text"></i> Анализ файлов
-        </a>
-        <a href="#" class="menu-btn" onclick="sendCommand('/edit'); return false;">
+        </button>
+        <button type="button"  class="btn btn-success" onclick="sendCommand('/edit'); return false;">
             <i class="fa fa-image"></i> Изображения
-        </a>
-        <a href="#" class="menu-btn" onclick="sendCommand('/guestrag'); return false;">
+        </button>
+        <button type="button"  class="btn btn-success" onclick="sendCommand('/guestrag'); return false;">
             <i class="fa fa-robot"></i> ИИ Агент
-        </a>
-        <a href="#" class="menu-btn" onclick="sendCommand('/billing'); return false;">
+        </button>
+        <a href="#"
+            class="btn btn-success"
+            name="billing"
+            onclick="sendCommand('/billing'); return false;">
             <i class="fa fa-credit-card"></i> Оплата
         </a>
-    </div>
 </div>
-<div>
-    <button type="button" class="btn btn-success">
-         <i class="fa fa-comments"></i> Чат с ИИ {{ test }}
-    </button>
-    {{ templates }} - {{ static}}
 </div>
 
 <script>
+function showStatus(message, isError = false) {
+    const statusEl = document.getElementById('status');
+    statusEl.textContent = message;
+    statusEl.className = 'alert alert-' + (isError ? 'danger' : 'success') + ' mb-3';
+    statusEl.style.display = 'block';
+    if (!isError) {
+        setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
+    }
+}
+
+function getUserId() {
+    // 1. Пробуем из MAX Bridge
+    let user_id = window.WebApp?.initDataUnsafe?.user?.id;
+    
+    // 2. Fallback: из URL fragment (после #)
+    if (!user_id) {
+        const hashParams = new URLSearchParams(window.location.hash.slice(1));
+        const webAppData = hashParams.get('WebAppData');
+        if (webAppData) {
+            const params = new URLSearchParams(webAppData);
+            const userData = params.get('user');
+            if (userData) {
+                try {
+                    user_id = JSON.parse(userData).id;
+                } catch (e) {}
+            }
+        }
+    }
+    
+    // 3. Fallback: из URL query (после ?)
+    if (!user_id) {
+        const params = new URLSearchParams(window.location.search);
+        user_id = params.get('user_id');
+    }
+    
+    return user_id;
+}
+
 async function sendCommand(command) {
+    const user_id = getUserId();
+    
+    if (!user_id) {
+        showStatus('User ID не получен. URL: ' + window.location.href.substring(0, 100) + '...', true);
+        return;
+    }
+    showStatus('URL: ' + window.location.href.substring(0, 100) + '...', true);
+        
     try {
         const response = await fetch('/api/send-command', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({command: command})
+            body: JSON.stringify({command: command, user_id: user_id})
         });
         const result = await response.json();
         if (result.success) {
-            console.log('Команда отправлена: ' + command);
+            showStatus('Команда "' + command + '" отправлена!');
+        } else {
+            showStatus('Ошибка: ' + (result.detail || 'Unknown'), true);
         }
     } catch (error) {
-        console.error('Ошибка отправки команды:', error);
+        showStatus('Ошибка: ' + error.message, true);
     }
 }
 </script>
