@@ -1,14 +1,51 @@
 {% extends "layout.html" %}
 
-{% block title %}Home{% endblock %}
+{% block title %}Меню{% endblock %}
 
 {% block body %}
-<div class="container mt-5">
+<div class="menu-container">
+    <h1 class="menu-title">Выберите режим</h1>
 
-    <div class="alert alert-success" role="alert">
-      Тест мини приложения, и просто текст
+    <div class="menu-buttons">
+        <a href="#" class="menu-btn" onclick="sendCommand('/gigachat'); return false;">
+            <i class="fa fa-address-book" aria-hidden="true"></i> Чат с ИИ
+        </a>
+        <a href="#" class="menu-btn" onclick="sendCommand('/file'); return false;">
+            <i class="fa fa-file-text"></i> Анализ файлов
+        </a>
+        <a href="#" class="menu-btn" onclick="sendCommand('/edit'); return false;">
+            <i class="fa fa-image"></i> Изображения
+        </a>
+        <a href="#" class="menu-btn" onclick="sendCommand('/guestrag'); return false;">
+            <i class="fa fa-robot"></i> ИИ Агент
+        </a>
+        <a href="#" class="menu-btn" onclick="sendCommand('/billing'); return false;">
+            <i class="fa fa-credit-card"></i> Оплата
+        </a>
     </div>
-    <p>Доступные команды:</p>
-    <p>/billing:</p>
 </div>
+<div>
+    <button type="button" class="btn btn-success">
+         <i class="fa fa-comments"></i> Чат с ИИ {{ test }}
+    </button>
+    {{ templates }} - {{ static}}
+</div>
+
+<script>
+async function sendCommand(command) {
+    try {
+        const response = await fetch('/api/send-command', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({command: command})
+        });
+        const result = await response.json();
+        if (result.success) {
+            console.log('Команда отправлена: ' + command);
+        }
+    } catch (error) {
+        console.error('Ошибка отправки команды:', error);
+    }
+}
+</script>
 {% endblock %}

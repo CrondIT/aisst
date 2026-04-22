@@ -48,8 +48,14 @@ def _verify_admin(
 
 @router.get("/")
 async def index(request: Request):
+    context = {}
+    context['test'] = "ьесьлвая строка"
+    context['templates'] = request.app.templates
+    context['static'] = request.app.static_dir
     return request.app.templates.TemplateResponse(
-        request, "index.html"
+        request,
+        "index.html",
+        context,
     )
 
 
@@ -166,6 +172,37 @@ async def chat_with_giga(body: ChatRequest, request: Request):
         raise HTTPException(
             status_code=500, detail=f"Ошибка GigaChat: {str(exc)}"
         )
+
+
+@router.post("/api/send-command")
+async def send_command(request: Request):
+    """
+    API endpoint для отправки команды от имени пользователя
+    (из мини-приложения).
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    command = data.get("command", "")
+    user_id = data.get("user_id")
+
+    if not command:
+        raise HTTPException(status_code=400, detail="Command is required")
+
+    if not command.startswith("/"):
+        command = "/" + command
+
+    sender = {"user_id": user_id, "name": "mini_app_user"}
+
+    result = await bot_logic.handle_command(command, sender)
+    if result:
+        await max_api.send_message(user_id, result)
+
+    return JSONResponse(
+        content={"success": True, "command": command, "response": result}
+    )
 
 
 @router.post("/transcribe-giga")
