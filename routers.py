@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     Header,
     HTTPException,
@@ -57,15 +58,15 @@ async def index(request: Request):
 
 
 @router.post("/webhook")
-async def webhook(request: Request):
+async def webhook(request: Request, background_tasks: BackgroundTasks):
     """Endpoint для приёма webhook-обновлений от MAX."""
     _, data = await max_api.handle_webhook(request)
 
     if isinstance(data, list):
         for update_item in data:
-            await max_api.process_update(update_item, request)
+            await max_api.process_update(update_item, request, background_tasks)
     else:
-        await max_api.process_update(data, request)
+        await max_api.process_update(data, request, background_tasks)
 
     return JSONResponse(content={"status": "ok"})
 

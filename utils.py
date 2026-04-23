@@ -12,7 +12,37 @@ from global_state import (
     PROXY_USER,
     PROXY_PASSWORD,
     TEMP_DIR,
+    MAX_BASE_URL,
+    MAX_API_TOKEN,
     )
+
+
+async def send_message_from_file(user_id: int, text: str) -> int | None:
+    """
+    Отправка сообщения через API MAX (для использования в фоновых задачах).
+    """
+    url = f"{MAX_BASE_URL}/messages"
+    headers = {
+        "Authorization": MAX_API_TOKEN,
+        "Content-Type": "application/json"
+    }
+    params = {"user_id": user_id}
+    payload = {"text": text}
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                url, headers=headers, params=params, json=payload
+            )
+            if response.status_code != 200:
+                logger.error(
+                    f"Ошибка отправки: {response.status_code} — "
+                    f"{response.text}"
+                )
+            return response.status_code
+        except Exception as e:
+            logger.error(f"Исключение при отправке: {e}")
+            return None
 
 
 def get_socks_proxy_mount() -> "httpx.HTTPTransport | None":

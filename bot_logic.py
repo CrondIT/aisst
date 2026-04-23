@@ -64,7 +64,7 @@ async def handle_message(
 ) -> str | None:
     """Обработка сообщений пользователя."""
     user_id = sender.get("user_id")
-    if not user_modes[user_id]:
+    if user_modes.get(user_id) is None:
         user_modes[user_id] = "gigachat"
     logger.info(
         f"handle_message: user_id={user_id}, mode={user_modes[user_id]}"
@@ -98,19 +98,16 @@ async def handle_image(
         sender: dict
 ) -> str | None:
     """Обработка изображений."""
-    if user_modes[sender["user_id"]] == "edit":
+    if user_modes.get(sender["user_id"]) == "edit":
         return "Режим редактирования ещё не реализован."
     return "Режим еще не работает"
 
 
 async def handle_file(
-        request: Request,
         file_name: str,
         sender: dict
 ) -> str | None:
     """Обработка файлов."""
-    if user_modes[sender["user_id"]] == "guestrag":
-        # сохраняем файл на диске
-        # сохраняем файл в векторную базу
-        return await save_to_vector_db(file_name, "Embeddings")
+    if user_modes.get(sender["user_id"]) == "guestrag":
+        return await save_to_vector_db(file_name, sender, "Embeddings")
     return "Режим еще не работает"

@@ -1,5 +1,6 @@
 """Модуль для взаимодействия с MAX API."""
 
+import asyncio
 import httpx
 import time
 from collections import defaultdict
@@ -20,6 +21,25 @@ from utils import (
     save_user_file,
 )
 from fastapi import Request
+from starlette.background import BackgroundTasks
+
+
+async def _process_file_async(
+        file_path: str,
+        sender: dict,
+        user_id: int
+) -> None:
+    """Асинхронная обработка файла без блокировки webhook."""
+    try:
+        result = await bot_logic.handle_file(file_path, sender)
+        if result:
+            await send_message(user_id, result)
+    except Exception:
+        import traceback
+        error_text = traceback.format_exc()
+        logger.error(f"Ошибка при обработке файла:\n{error_text}")
+        await send_message(user_id, "Ошибка обработки файла. Обратитесь к администратору.")
+
 
 # ─── Rate limiting ───
 _rate_limit_store: dict[int, list[float]] = defaultdict(list)
@@ -70,6 +90,68 @@ async def send_message(user_id: int, text: str) -> int | None:
             return None
 
 
+BUTTONS = [
+    {"text": "Чат с ИИ", "command": "gigachat"},
+    {"text": "Анализ файлов", "command": "file"},
+    {"text": "Изображения", "command": "edit"},
+    {"text": "ИИ Агент", "command": "guestrag"},
+    {"text": "Настройки", "command": "settings"},
+    {"text": "Оплата", "command": "billing"},
+]
+
+
+async def send_inline_message(
+        user_id: int, text: str, buttons: list[dict] = None
+) -> int | None:
+    """Отправка сообщения с инлайн кнопками через API MAX."""
+    if buttons is None:
+        buttons = BUTTONS
+    url = f"{MAX_BASE_URL}/messages"
+    headers = {
+        "Authorization": MAX_API_TOKEN,
+        "Content-Type": "application/json"
+    }
+    params = {"user_id": user_id}
+
+    rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+    keyboard_buttons = [
+        [
+            {
+                "type": "callback",
+                "text": btn["text"],
+                "payload": btn["command"]
+            }
+            for btn in row
+        ]
+        for row in rows
+    ]
+
+    payload = {
+        "text": text,
+        "attachments": [{
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": keyboard_buttons
+            }
+        }]
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                url, headers=headers, params=params, json=payload
+            )
+            if response.status_code != 200:
+                logger.error(
+                    f"Ошибка отправки: "
+                    f"{response.status_code} — {response.text}"
+                )
+            return response.status_code
+        except Exception as e:
+            logger.error(f"Исключение при отправке: {e}")
+            return None
+
+
 def verify_webhook_secret(
         payload_body: bytes,
         secret_header: str | None
@@ -100,7 +182,7 @@ async def subscribe_webhook() -> None:
     }
     payload = {
         "url": WEBHOOK_URL,
-        "update_types": ["message_created"],
+        "update_types": ["message_created", "message_callback"],
     }
     if WEBHOOK_SECRET:
         payload["secret"] = WEBHOOK_SECRET
@@ -138,9 +220,29 @@ async def delete_subscription(subscription_id: int = None) -> dict:
         return response.json()
 
 
-async def process_update(update: dict, request: Request) -> None:
+async def process_update(
+        update: dict,
+        request: Request,
+        background_tasks: BackgroundTasks = None
+) -> None:
     """Обработка одного обновления."""
-    if update.get("update_type") != "message_created":
+    update_type = update.get("update_type")
+
+    if update_type == "message_callback":
+        callback_obj = update.get("callback", {})
+        sender = callback_obj.get("user", {})
+        user_id = sender.get("user_id")
+        callback_data = callback_obj.get("payload", "")
+        logger.info(f"Callback от {sender.get('name')}: {callback_data}")
+        if callback_data and user_id:
+            command_response = await bot_logic.handle_command(
+                "/" + callback_data, sender
+            )
+            if command_response is not None:
+                await send_message(user_id, command_response)
+        return
+
+    if update_type != "message_created":
         return
 
     message = update.get("message", {})
@@ -209,10 +311,16 @@ async def process_update(update: dict, request: Request) -> None:
                     user_id,
                     f"Не удалось загрузить файл: {filename}"
                 )
-            return await send_message(
-                user_id,
-                await bot_logic.handle_file(request, file_path, sender)
-            )
+            await send_message(user_id, "Файл получен. Начинаю обработку...")
+            if background_tasks:
+                background_tasks.add_task(
+                    _process_file_async, file_path, sender, user_id
+                )
+            else:
+                asyncio.create_task(
+                    _process_file_async(file_path, sender, user_id)
+                )
+            return
 
     logger.info(f"Сообщение от {sender.get('name')}: {user_text}")
 
@@ -222,7 +330,16 @@ async def process_update(update: dict, request: Request) -> None:
 
     # если команда то отправляем ее на обработку в bot_logic
     if user_text.startswith("/"):
-        command_response = await bot_logic.handle_command(user_text, sender)
+        command_parts = user_text.split(maxsplit=1)
+        command = command_parts[0].lower()
+        if command == "/start":
+            text = "Большой блок информационного текста"
+            await send_inline_message(user_id, text)
+            return
+        else:
+            command_response = await bot_logic.handle_command(
+                user_text, sender
+            )
         if command_response is not None:  # если есть ответ о выводим его
             await send_message(user_id, command_response)
             return

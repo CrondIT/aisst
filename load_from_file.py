@@ -72,21 +72,40 @@ async def get_loader_for_file(file_path: str):
         return None
 
 
-async def save_to_vector_db(file_path, model_name: str = "GigaChat"):
-    # Считаем хеш файла
-    file_id = get_file_hash(file_path)
-    # Проверяем, есть ли файл в базе
-    if not check_in_vector_db(file_id):
-        # Загружаем документ
-        loader = await get_loader_for_file(file_path)
-    else:
-        logger.info(f"Файл уже есть в базе: {file_path}")
-        return f"Файл уже есть в базе: {file_path}"
+async def save_to_vector_db(
+        file_path,
+        sender: dict,
+        model_name: str = "GigaChat"
+):
+    user_id = sender.get("user_id")
+    file_name = os.path.basename(file_path)
 
+    from utils import send_message_from_file
+
+    async def send_progress(current: int, total: int):
+        percent = int(current / total * 100)
+        text = (
+            f"📄 {file_name}\n\n"
+            f"⏳ Прогресс: {current}/{total} ({percent}%)\n\n"
+            f"Обработка продолжается..."
+        )
+        await send_message_from_file(user_id, text)
+
+    file_id = get_file_hash(file_path)
+    embeddings = get_giga_embeddings(model_name)
+    vector_db = None
+    if os.path.exists(GUEST_RAG_DIR):
+        vector_db = Chroma(
+            persist_directory=GUEST_RAG_DIR,
+            embedding_function=embeddings
+        )
+        if check_in_vector_db(file_id, vector_db._collection):
+            logger.info(f"Файл уже есть в базе: {file_path}")
+            return f"Файл уже есть в базе: {file_path}"
+    loader = await get_loader_for_file(file_path)
     if loader is None:
         logger.warning(f"Формат не поддерживается: {file_path}")
         return f"Формат не поддерживается: {file_path}"
-
     try:
         documents = loader.load()
     except Exception as e:
@@ -94,33 +113,34 @@ async def save_to_vector_db(file_path, model_name: str = "GigaChat"):
         return f"Не удалось извлечь текст из {file_path}: {e}"
 
     total_chars = sum(len(doc.page_content) for doc in documents)
-
+    # 5. Разбиение на чанки
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=800,
         chunk_overlap=100
     )
     chunks = text_splitter.split_documents(documents)
 
-    # 3. Инициализируем эмбеддинги
-    embeddings = get_giga_embeddings(model_name)
-
-    # 4. Получаем эмбеддинги батчами по 100 чанков
+    # 6. Получаем эмбеддинги батчами
     all_embeddings = []
-    batch_size = 100
+    batch_size = 50
+    progress_interval = 200
+    total_chunks = len(chunks)
 
-    for i in range(0, len(chunks), batch_size):
+    for i in range(0, total_chunks, batch_size):
         batch = chunks[i:i + batch_size]
         texts = [chunk.page_content for chunk in batch]
         embeddings_list = embeddings.embed_documents(texts)
         all_embeddings.extend(embeddings_list)
-        logger.info(
-            f"Обработано {min(i + batch_size, len(chunks))}"
-            f"/{len(chunks)} чанков"
-        )
+
+        processed = min(i + batch_size, total_chunks)
+        if processed % progress_interval == 0:
+            # logger.info(f"Обработано {processed}/{total_chunks} чанков")
+            await send_progress(processed, total_chunks)
 
     logger.info(f"Получено {len(all_embeddings)} эмбеддингов")
-
-    # 5. Создаем или обновляем базу
+    # 7. Сохранение в ChromaDB
+    # Если база уже есть — добавляются новые документы
+    # Если нет — создаётся новая база с первыми документами
     if os.path.exists(GUEST_RAG_DIR) and os.listdir(GUEST_RAG_DIR):
         vector_db = Chroma(
             persist_directory=GUEST_RAG_DIR,
@@ -138,7 +158,7 @@ async def save_to_vector_db(file_path, model_name: str = "GigaChat"):
             persist_directory=GUEST_RAG_DIR
         )
         logger.info(f"Создана новая база с {len(chunks)} фрагментами.")
-
+    # 8. Сообщение о количестве обработанных символов и фрагментов.
     return (
         f"Файл добавлен в базу. Символов: {total_chars}, "
         f"фрагментов: {len(chunks)} "
