@@ -14,6 +14,7 @@ from langchain_chroma import Chroma
 from global_state import GUEST_RAG_DIR
 from rag_embeddings import get_giga_embeddings
 from utils import logger
+import shutil
 
 
 def get_file_hash(file_path):
@@ -39,6 +40,72 @@ def check_in_vector_db(file_id, collection):
 
     # Если список IDs не пуст — файл уже в базе
     return len(existing['ids']) > 0
+
+
+def check_vector_db(persist_dir: str, embeddings):
+    """
+    Загружает существующую векторную базу из persist_dir,
+    или создаёт новую пустую базу.
+    В случае повреждения данных удаляет папку и создаёт чистую базу.
+
+    Возвращает:
+        Chroma: экземпляр векторной базы
+
+    Исключения:
+        Не выбрасывает, так как все ошибки обрабатываются внутренне.
+    """
+    # Если папка существует, пробуем загрузить базу
+    if os.path.isdir(persist_dir):
+        try:
+            db = Chroma(
+                persist_directory=persist_dir,
+                embedding_function=embeddings
+            )
+            logger.info(f"Загружена существующая база из {persist_dir}")
+            return db
+        except Exception as e:
+            logger.error(
+                f"Ошибка при загрузке базы из {persist_dir}: "
+                f"{e}. Удаляем повреждённую папку."
+                )
+            shutil.rmtree(persist_dir, ignore_errors=True)
+            # Папка удалена — ниже создадим новую
+
+    # Создаём папку и новую пустую базу
+    os.makedirs(persist_dir, exist_ok=True)
+    db = Chroma(
+        persist_directory=persist_dir,
+        embedding_function=embeddings
+    )
+    logger.info(f"Создана новая пустая векторная база в {persist_dir}")
+    return db
+
+
+def is_file_in_vector_db(
+        file_path: str, file_id: str, persist_dir: str, embeddings
+):
+    """
+    Проверяет, присутствует ли файл с заданным file_id в векторной базе.
+
+    Аргументы:
+        file_path: путь к файлу (только для логирования)
+        file_id: уникальный идентификатор файла (обычно хеш)
+        persist_dir: директория хранения Chroma
+        embeddings: функция эмбеддингов
+
+    Возвращает:
+        (bool, Chroma): (найден_ли_файл, экземпляр_базы)
+    """
+    # Получаем базу (существующую или новую)
+    vector_db = check_vector_db(persist_dir, embeddings)
+
+    # Ищем документы с метаданным file_id (без загрузки содержимого)
+    result = vector_db.get(where={"file_id": file_id}, include=[])
+
+    if result['ids']:
+        logger.info(f"Файл уже есть в базе: {file_path}")
+        return True, vector_db
+    return False, vector_db
 
 
 async def get_loader_for_file(file_path: str):
@@ -75,33 +142,23 @@ async def get_loader_for_file(file_path: str):
 async def save_to_vector_db(
         file_path,
         sender: dict,
-        model_name: str = "GigaChat"
+        model_name: str = "Embeddings",
+        persist_dir: str = GUEST_RAG_DIR,
 ):
-    user_id = sender.get("user_id")
-    file_name = os.path.basename(file_path)
+    # user_id = sender.get("user_id")
+    # file_name = os.path.basename(file_path)
 
-    from utils import send_message_from_file
-
-    async def send_progress(current: int, total: int):
-        percent = int(current / total * 100)
-        text = (
-            f"📄 {file_name}\n\n"
-            f"⏳ Прогресс: {current}/{total} ({percent}%)\n\n"
-            f"Обработка продолжается..."
-        )
-        await send_message_from_file(user_id, text)
-
-    file_id = get_file_hash(file_path)
+    # 1. проверяем есть ли файл в базе
     embeddings = get_giga_embeddings(model_name)
-    vector_db = None
-    if os.path.exists(GUEST_RAG_DIR):
-        vector_db = Chroma(
-            persist_directory=GUEST_RAG_DIR,
-            embedding_function=embeddings
-        )
-        if check_in_vector_db(file_id, vector_db._collection):
-            logger.info(f"Файл уже есть в базе: {file_path}")
-            return f"Файл уже есть в базе: {file_path}"
+    file_id = get_file_hash(file_path)  # вычисляем хеш нового файла
+
+    is_file_found, vector_db = is_file_in_vector_db(
+        file_path, file_id, persist_dir, embeddings
+    )
+    if is_file_found:
+        logger.info(f"Файл уже есть в базе: {file_path}")
+        return f"Файл уже загружен: {file_path}"
+
     loader = await get_loader_for_file(file_path)
     if loader is None:
         logger.warning(f"Формат не поддерживается: {file_path}")
@@ -113,51 +170,44 @@ async def save_to_vector_db(
         return f"Не удалось извлечь текст из {file_path}: {e}"
 
     total_chars = sum(len(doc.page_content) for doc in documents)
-    # 5. Разбиение на чанки
+
+    # 2. Настраиваем сплиттер, chunk_size ~ 1500-1800 символов
+    # обычно укладывается в 514 токенов GigaChat
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=100
+        chunk_size=1200,
+        chunk_overlap=200,  # нахлест, чтобы не терять смысл на стыках
+        separators=["\n\n", "\n", " ", ""]
     )
+    # 3. Разбиение на чанки
     chunks = text_splitter.split_documents(documents)
 
+    # 4. Подготавливаем списки для загрузки
+    texts = [doc.page_content for doc in chunks]  # текст для эмбеддингов
+    metadatas = [doc.metadata for doc in chunks]  # метаданные
+
+    # 5. Получаем эмбеддинги батчами
+    batch_size = 10
+    # progress_interval = 200
+    # total_chunks = len(chunks)
+
     # 6. Получаем эмбеддинги батчами
-    all_embeddings = []
-    batch_size = 50
-    progress_interval = 200
-    total_chunks = len(chunks)
+    for i in range(0, len(texts), batch_size):
+        batch_texts = texts[i:i + batch_size]
+        batch_metadatas = metadatas[i:i + batch_size]
+        try:
+            embeddings_list = embeddings.embed_documents(batch_texts)
+            # 5. Загружаем в ChromaDB
+            vector_db.add_texts(
+                documents=batch_texts,
+                embedding_function=embeddings_list,
+                metadatas=batch_metadatas,   # сохраняем исходные метаданные
+                ids=[f"chunk_{i+j}" for j in range(len(batch_texts))]
+            )
+            logger.info(f"Загружено: {i + len(batch_texts)} / {len(texts)}")
+        except Exception as e:
+            logger.error(f"Ошибка на батче {i}: {e}")
+            return f"Ошибка на батче {i}: {e}"
 
-    for i in range(0, total_chunks, batch_size):
-        batch = chunks[i:i + batch_size]
-        texts = [chunk.page_content for chunk in batch]
-        embeddings_list = embeddings.embed_documents(texts)
-        all_embeddings.extend(embeddings_list)
-
-        processed = min(i + batch_size, total_chunks)
-        if processed % progress_interval == 0:
-            # logger.info(f"Обработано {processed}/{total_chunks} чанков")
-            await send_progress(processed, total_chunks)
-
-    logger.info(f"Получено {len(all_embeddings)} эмбеддингов")
-    # 7. Сохранение в ChromaDB
-    # Если база уже есть — добавляются новые документы
-    # Если нет — создаётся новая база с первыми документами
-    if os.path.exists(GUEST_RAG_DIR) and os.listdir(GUEST_RAG_DIR):
-        vector_db = Chroma(
-            persist_directory=GUEST_RAG_DIR,
-            embedding_function=embeddings
-        )
-        vector_db.add_documents(documents=chunks)
-        logger.info(
-            f"Добавлено {len(chunks)} фрагментов в существующую базу."
-        )
-    else:
-        os.makedirs(GUEST_RAG_DIR, exist_ok=True)
-        vector_db = Chroma.from_documents(
-            documents=chunks,
-            embedding=embeddings,
-            persist_directory=GUEST_RAG_DIR
-        )
-        logger.info(f"Создана новая база с {len(chunks)} фрагментами.")
     # 8. Сообщение о количестве обработанных символов и фрагментов.
     return (
         f"Файл добавлен в базу. Символов: {total_chars}, "

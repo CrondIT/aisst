@@ -109,5 +109,9 @@ async def handle_file(
 ) -> str | None:
     """Обработка файлов."""
     if user_modes.get(sender["user_id"]) == "guestrag":
-        return await save_to_vector_db(file_name, sender, "Embeddings")
+        return await save_to_vector_db(
+            file_path=file_name,
+            sender=sender,
+            model_name="Embeddings"
+        )
     return "Режим еще не работает"
