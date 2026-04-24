@@ -57,6 +57,8 @@ MODELS = {
     "edit": "gemini-3-pro-image-preview",
     "ai_file": "gpt-5.2-chat-latest",
 }
+GIGA_EMBEDDINGS_MODEL = "Embeddings"
+GIGA_CHAT_MODEL = "GigaChat"
 
 # ─── Настройки webhook ───
 # URL, на который MAX будет присылать обновления (строго HTTPS, порт 443)

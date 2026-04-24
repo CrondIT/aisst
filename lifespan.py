@@ -78,4 +78,4 @@ async def lifespan(app: FastAPI):
     await db.engine.dispose()
     logger.info("Shutting down, closing giga_client...")
     if giga_client is not None:
-        await giga_client.close()
+        giga_client.close()
