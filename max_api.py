@@ -38,7 +38,9 @@ async def _process_file_async(
         import traceback
         error_text = traceback.format_exc()
         logger.error(f"Ошибка при обработке файла:\n{error_text}")
-        await send_message(user_id, "Ошибка обработки файла. Обратитесь к администратору.")
+        await send_message(
+            user_id, "Ошибка обработки файла. Обратитесь к администратору."
+        )
 
 
 # ─── Rate limiting ───

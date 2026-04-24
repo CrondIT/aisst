@@ -1,5 +1,8 @@
 """Модуль синглтона для GigaChat Embeddings."""
 
+from dataclasses import dataclass
+from typing import Optional
+
 from langchain_gigachat.embeddings import GigaChatEmbeddings
 # from langchain_community.embeddings.gigachat import GigaChatEmbeddings
 from global_state import (
@@ -11,7 +14,20 @@ from global_state import (
 _giga_embeddings = None
 
 
-def get_giga_embeddings(model_name: str = "GigaChat") -> GigaChatEmbeddings:
+@dataclass
+class SearchSource:
+    text: str
+    source: Optional[str]
+    score: float
+
+
+@dataclass
+class SearchResult:
+    context: str
+    sources: list[SearchSource]
+
+
+def get_giga_embeddings(model_name: str = "Embeddings") -> GigaChatEmbeddings:
     """Ленивая инициализация GigaChatEmbeddings (синглтон)."""
     global _giga_embeddings
     if _giga_embeddings is None:
@@ -22,3 +38,55 @@ def get_giga_embeddings(model_name: str = "GigaChat") -> GigaChatEmbeddings:
             ca_bundle_file=RUS_TRUSTED_ROOT_CA_PEM,
         )
     return _giga_embeddings
+
+
+def search_vector_db(
+        prompt: str,
+        vector_db,
+        top_k: int = 3,
+        max_context_chars: int = 2000
+) -> SearchResult:
+    """Поиск в векторной базе с оценкой релевантности."""
+    embeddings = get_giga_embeddings()
+    query_vector = embeddings.embed_query(prompt)
+
+    results = vector_db.similarity_search_with_score(
+        query_vector,
+        k=top_k
+    )
+
+    sources = []
+    total_chars = 0
+
+    for doc, score in results:
+        if total_chars >= max_context_chars:
+            break
+
+        text = doc.page_content
+        source = doc.metadata.get("source", "unknown")
+
+        sources.append(SearchSource(
+            text=text,
+            source=source,
+            score=score
+        ))
+        total_chars += len(text)
+
+    context = "\n".join(s.text for s in sources)
+
+    return SearchResult(context=context, sources=sources)
+
+
+def format_sources(sources: list[SearchSource]) -> str:
+    """Форматирование источников для ответа."""
+    if not sources:
+        return "Источники не найдены."
+
+    lines = ["📚 Источники:"]
+    for i, s in enumerate(sources, 1):
+        preview = s.text[:100] + "..." if len(s.text) > 100 else s.text
+        lines.append(
+            f"{i}. {s.source} (релевантность: {s.score:.2f})\n"
+            f"   {preview}"
+        )
+    return "\n".join(lines)

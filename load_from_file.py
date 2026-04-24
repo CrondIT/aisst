@@ -26,22 +26,6 @@ def get_file_hash(file_path):
     return hash_sha256.hexdigest()
 
 
-def check_in_vector_db(file_id, collection):
-    """
-    Проверяет наличие файла по его уникальному хешу (file_id).
-    collection — это объект коллекции ChromaDB.
-    """
-    # Ищем запись по ID. Параметр include=[] отключает загрузку
-    # документов и эмбеддингов, что экономит RAM.
-    existing = collection.get(
-        ids=[file_id],
-        include=[]
-    )
-
-    # Если список IDs не пуст — файл уже в базе
-    return len(existing['ids']) > 0
-
-
 def check_vector_db(persist_dir: str, embeddings):
     """
     Загружает существующую векторную базу из persist_dir,
@@ -181,29 +165,20 @@ async def save_to_vector_db(
     # 3. Разбиение на чанки
     chunks = text_splitter.split_documents(documents)
 
-    # 4. Подготавливаем списки для загрузки
-    texts = [doc.page_content for doc in chunks]  # текст для эмбеддингов
-    metadatas = [doc.metadata for doc in chunks]  # метаданные
-
     # 5. Получаем эмбеддинги батчами
     batch_size = 10
     # progress_interval = 200
     # total_chunks = len(chunks)
 
     # 6. Получаем эмбеддинги батчами
-    for i in range(0, len(texts), batch_size):
-        batch_texts = texts[i:i + batch_size]
-        batch_metadatas = metadatas[i:i + batch_size]
+    for i in range(0, len(chunks), batch_size):
+        batch_docs = chunks[i:i + batch_size]
         try:
-            embeddings_list = embeddings.embed_documents(batch_texts)
-            # 5. Загружаем в ChromaDB
-            vector_db.add_texts(
-                documents=batch_texts,
-                embedding_function=embeddings_list,
-                metadatas=batch_metadatas,   # сохраняем исходные метаданные
-                ids=[f"chunk_{i+j}" for j in range(len(batch_texts))]
+            vector_db.add_documents(
+                documents=batch_docs,
+                ids=[f"chunk_{i+j}" for j in range(len(batch_docs))]
             )
-            logger.info(f"Загружено: {i + len(batch_texts)} / {len(texts)}")
+            logger.info(f"Загружено: {i + len(batch_docs)} / {len(chunks)}")
         except Exception as e:
             logger.error(f"Ошибка на батче {i}: {e}")
             return f"Ошибка на батче {i}: {e}"
