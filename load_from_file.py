@@ -158,7 +158,7 @@ async def save_to_vector_db(
     # 2. Настраиваем сплиттер, chunk_size ~ 1500-1800 символов
     # обычно укладывается в 514 токенов GigaChat
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1200,
+        chunk_size=1000,
         chunk_overlap=200,  # нахлест, чтобы не терять смысл на стыках
         separators=["\n\n", "\n", " ", ""]
     )

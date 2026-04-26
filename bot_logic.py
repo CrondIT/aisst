@@ -5,18 +5,13 @@ from fastapi import Request
 import db
 from global_state import (
     user_modes,
-    GUEST_RAG_DIR,
 )
 from utils import logger
 from load_from_file import (
     save_to_vector_db,
-    check_vector_db,
 )
-from rag_embeddings import (
-    get_giga_embeddings,
-    search_vector_db,
-    format_sources,
-)
+
+from rag_chain import ask_rag  # ← единственный импорт для RAG
 
 
 async def handle_command(user_text: str, sender: dict) -> str | None:
@@ -27,8 +22,7 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
     if not user_text.startswith("/"):
         return None
 
-    command_parts = user_text.split(maxsplit=1)
-    command = command_parts[0].lower()
+    command = user_text.split(maxsplit=1)[0].lower()
 
     user_name = sender.get("name", "Неизвестный пользователь")
     user_id = sender.get("user_id")
@@ -40,22 +34,33 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
             return f"Уважаемый: {user_name}!\n" f"Ваш баланс: {balance} ₽"
         return f"Пользователь: {user_name} в списках не значится)"
 
-    # Будущие команды:
-    if command == "/gigachat":
-        user_modes[user_id] = "gigachat"
-        return "gigachat"
-    if command == "/gigachatpro":
-        user_modes[user_id] = "gigachatpro"
-        return "gigachatpro"
-    if command == "/file":
-        user_modes[user_id] = "file"
-        return "file"
-    if command == "/edit":
-        user_modes[user_id] = "edit"
-        return "edit"
-    if command == "/guestrag":
-        user_modes[user_id] = "guestrag"
-        return "Режим редактирование векторной базы данные для ИИ агента гостя"
+    mode_map = {
+        "/gigachat": (
+            "gigachat",
+            "Режим: чат с ИИ по документам колледжа"
+        ),
+        "/gigachatpro": (
+            "gigachatpro",
+            "Режим: GigaChat Pro"
+        ),
+        "/file": (
+            "file",
+            "Режим: анализ файлов"
+        ),
+        "/edit": (
+            "edit",
+            "Режим: редактирование"
+        ),
+        "/guestrag": (
+            "guestrag",
+            "Режим: загрузка документов в базу знаний"
+        ),
+    }
+
+    if command in mode_map:
+        mode, reply = mode_map[command]
+        user_modes[user_id] = mode
+        return reply
 
     return None
 
@@ -73,33 +78,9 @@ async def handle_message(
 
     match user_modes[user_id]:
         case "gigachat":
-            logger.info("-------------------in case---------------")
-            client = request.app.state.giga_client
-            logger.info("-------------------client---------------")
-            embeddings = get_giga_embeddings(model_name="Embeddings")
-            logger.info("-------------------embeddings---------------")
-            vector_db = check_vector_db(
-                persist_dir=GUEST_RAG_DIR,
-                embeddings=embeddings
-            )
-            logger.info("-------------------vector_db---------------")
-            result = search_vector_db(
-                user_text,
-                vector_db,
-                top_k=3
-            )
-            logger.info("-------------------result---------------")
-            prompt = (
-                f"Используй этот контекст для ответа: {result.context}\n\n"
-                f"Вопрос: {user_text}"
-            )
-            logger.info("-------------------prompt---------------")
-            response = client.generate(prompt, model="GigaChat-Pro")
-            logger.info("-------------------response---------------")
-            answer = response.choices[0].message.content
-            logger.info("-------------------answer---------------")
-            sources = format_sources(result.sources)
-            return f"{answer}\n\n{sources}"
+            # app.state.giga_lc_client — LangChain GigaChat, совместим с LCEL
+            lc_llm = request.app.state.giga_lc_client
+            return await ask_rag(user_text=user_text, lc_llm=lc_llm, top_k=3)
         case "gigachatpro":
             return await request.app.state.giga_client.generate(
                 user_text,
@@ -110,9 +91,12 @@ async def handle_message(
         case "edit":
             return "Режим редактирования ещё не реализован."
         case "guestrag":
-            pass
+            return (
+                "Вы в режиме загрузки документов. "
+                "Отправьте PDF-файл для добавления в базу знаний."
+            )
         case None:
-            return "Используйте /chat для начала общения с ИИ."
+            return "Используйте /gigachat для начала общения с ИИ."
 
 
 async def handle_image(
@@ -131,3 +115,10 @@ async def handle_file(file_name: str, sender: dict) -> str | None:
             file_path=file_name, sender=sender, model_name="Embeddings"
         )
     return "Режим еще не работает"
+
+
+async def transcribe_audio(audio_data: bytes, ext: str) -> str | None:
+    """Заглушка для транскрибации аудио."""
+    logger.warning("transcribe_audio вызван, но не реализован")
+    return None
+

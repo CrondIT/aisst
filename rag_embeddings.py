@@ -10,6 +10,7 @@ from global_state import (
     GIGACHAT_SCOPE,
     RUS_TRUSTED_ROOT_CA_PEM
     )
+# from langchain.chains import RetrievalQA
 
 _giga_embeddings = None
 

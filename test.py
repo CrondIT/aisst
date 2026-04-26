@@ -1,30 +1,11 @@
-from global_state import (
-    MAX_API_TOKEN,
-    MAX_BASE_URL,
-    GIGACHAT_API_KEY,
-    WEBHOOK_URL,
-    WEBHOOK_SECRET,
-    GIGACHAT_SCOPE,
-    ADMIN_API_TOKEN,
-    GEMINI_API_KEY,
-    MODELS,
-)
-from gigachat import GigaChat
+from rag_embeddings import get_giga_embeddings
+from load_from_file import check_vector_db
+from global_state import GUEST_RAG_DIR
 
-with GigaChat(
-        credentials=GIGACHAT_API_KEY,
-        scope=GIGACHAT_SCOPE,
-        model="GigaChat",
-        ca_bundle_file="russian_trusted_root_ca_pem.crt",
-) as client:
-    models = client.get_models()
-    for model in models.data:
-        print(f"{model.id_} (owned_by={model.owned_by})")
+embeddings = get_giga_embeddings('Embeddings')
+db = check_vector_db(GUEST_RAG_DIR, embeddings)
 
-ALLOWED_EXTENSIONS = {
-    "guestrag": {".pdf", ".docx", ".txt"},
-    "file": {".pdf", ".docx", ".txt"},
-}
-ext = "truww.pdf".split('.')[-1].lower()
-print(ext)
-print(ext in ALLOWED_EXTENSIONS.get("guestrag"))
+# Берём несколько документов и смотрим их метаданные
+results = db.get(limit=5, include=['metadatas'])
+for i, meta in enumerate(results['metadatas']):
+    print(f'[{i}] {meta}')
