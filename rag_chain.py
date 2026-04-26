@@ -61,17 +61,18 @@ def _make_source_label(doc) -> str:
     # Имя файла: берём basename, убираем служебный префикс "rag_12345_"
     raw_source = meta.get("source", "")
     filename = os.path.basename(raw_source)
+    filename = os.path.splitext(filename)[0]
     filename = re.sub(r"^rag_\d+_", "", filename)
 
     # Номер страницы (PyPDFLoader считает с 0, показываем с 1)
-    page = meta.get("page")
-    page_str = f", стр. {page + 1}" if page is not None else ""
+    # page = meta.get("page")
+    # page_str = f", стр. {page + 1}" if page is not None else ""
 
     # Заголовок статьи/раздела/главы из текста чанка
     heading = _extract_heading(doc.page_content)
     heading_str = f", {heading}" if heading else ""
 
-    return f"«{filename}»{page_str}{heading_str}"
+    return f"«{filename}»{heading_str}"
 
 
 def _format_docs(docs: list) -> str:
@@ -96,13 +97,16 @@ def _format_docs(docs: list) -> str:
 # ── Системный промпт ─────────────────────────────────────────────────────────
 _SYSTEM_PROMPT = (
     "Ты — помощник студентов колледжа ССТ.\n"
+    "Отвечай только про техникумы, колледжи, "
+    "cреднее профессиональное образование.\n"
+    "Не включай в ответ информацию про высшее образование и про ВУЗы\n"
     "Отвечай ТОЛЬКО на основе предоставленных фрагментов документов.\n"
     "Если в документах нет ответа — прямо скажи об этом.\n"
     "Если в документах несколько фактов приведи их все \n"
     "Отвечай кратко: не более 6–10 предложений.\n"
     "Не придумывай факты.\n\n"
     "ВАЖНО: в конце ответа ОБЯЗАТЕЛЬНО укажи источник в формате:\n"
-    "📄 Источник: <название файла>, <стр. N>, "
+    "📄 Источник: <название файла>, <заголовок>, "
     "<Статья или Раздел если найдены>\n\n"
     "Фрагменты документов:\n{context}"
 )
