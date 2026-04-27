@@ -4,12 +4,13 @@ from dataclasses import dataclass
 from typing import Optional
 
 from langchain_gigachat.embeddings import GigaChatEmbeddings
+# from langchain_community.embeddings.gigachat import GigaChatEmbeddings
 from global_state import (
     GIGACHAT_API_KEY,
     GIGACHAT_SCOPE,
-    RUS_TRUSTED_ROOT_CA_PEM,
-    GIGA_EMBEDDINGS_MODEL,
+    RUS_TRUSTED_ROOT_CA_PEM
     )
+# from langchain.chains import RetrievalQA
 
 _giga_embeddings = None
 
@@ -18,7 +19,7 @@ _giga_embeddings = None
 class SearchSource:
     text: str
     source: Optional[str]
-    score: float
+    score: Optional[float] = None
 
 
 @dataclass
@@ -27,9 +28,7 @@ class SearchResult:
     sources: list[SearchSource]
 
 
-def get_giga_embeddings(
-        model_name: str = GIGA_EMBEDDINGS_MODEL
-) -> GigaChatEmbeddings:
+def get_giga_embeddings(model_name: str = "Embeddings") -> GigaChatEmbeddings:
     """Ленивая инициализация GigaChatEmbeddings (синглтон)."""
     global _giga_embeddings
     if _giga_embeddings is None:
@@ -49,18 +48,20 @@ def search_vector_db(
         max_context_chars: int = 2000
 ) -> SearchResult:
     """Поиск в векторной базе с оценкой релевантности."""
-    embeddings = get_giga_embeddings()
-    query_vector = embeddings.embed_query(prompt)
+    # embeddings = get_giga_embeddings()
+    # uery_vector = embeddings.embed_query(prompt)
 
-    results = vector_db.similarity_search_with_score(
-        query_vector,
-        k=top_k
+    # results = vector_db.similarity_search_with_score(
+    #    query_vector,
+    #    k=top_k
+    # )
+    results = vector_db.similarity_search_with_relevance_scores(
+        prompt, k=top_k
     )
-
     sources = []
     total_chars = 0
 
-    for doc, score in results:
+    for doc in results:
         if total_chars >= max_context_chars:
             break
 
@@ -70,7 +71,6 @@ def search_vector_db(
         sources.append(SearchSource(
             text=text,
             source=source,
-            score=score
         ))
         total_chars += len(text)
 

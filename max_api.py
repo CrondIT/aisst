@@ -22,6 +22,7 @@ from utils import (
 )
 from fastapi import Request
 from starlette.background import BackgroundTasks
+import os
 
 
 async def _process_file_async(
@@ -304,9 +305,12 @@ async def process_update(
             if not filename:
                 return
             ext = filename.split('.')[-1].lower()
+            name = os.path.splitext(filename)[0]
             if ext not in ALLOWED_EXTENSIONS.get("guestrag"):
                 return
-            file_path = await save_user_file(attr_url, user_id, ext, "rag")
+            file_path = await save_user_file(
+                attr_url, user_id, ext, "rag", name
+            )
             if not file_path:
                 logger.error(f"Не удалось загрузить файл: {filename}")
                 return await send_message(

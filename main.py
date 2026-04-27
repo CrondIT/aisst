@@ -35,6 +35,7 @@ def create_app() -> FastAPI:
     if os.path.isdir(static_dir):
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+    templates = Jinja2Templates(directory="templates")
 
     app.static_dir = static_dir
     app.templates = templates

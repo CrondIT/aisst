@@ -163,7 +163,11 @@ async def save_user_image(image_url: str, user_id: int) -> str | None:
 
 
 async def save_user_file(
-        file_url: str, user_id: int, ext: str, default_name: str = "file"
+        file_url: str,
+        user_id: int,
+        ext: str,
+        default_name: str = "file",
+        name: str = None,
 ) -> str | None:
     """Скачивает и сохраняет произвольный файл в temp/."""
     try:
@@ -178,8 +182,9 @@ async def save_user_file(
                 "Content-Type", ""
             ).split(";")[0].strip()
 
-            timestamp = int(datetime.now().timestamp() * 1000)
-            filename = f"{default_name}_{user_id}_{timestamp}.{ext}"
+            # timestamp = int(datetime.now().timestamp() * 1000)
+            name = name[:90] if len(name) > 90 else name
+            filename = f"{default_name}_{user_id}_{name}.{ext}"
             filepath = os.path.join(TEMP_DIR, filename)
 
             with open(filepath, "wb") as f:
