@@ -277,7 +277,9 @@ async def process_update(
     nickname = sender.get("name", f"user_{user_id}")
     if await db.create_user(user_id, nickname):
         logger.info(f"Создан пользователь: {nickname} (id={user_id})")
-
+    user_data = await db.get_user(user_id)
+    permission = user_data["permission"]
+    print(nickname, permission)
     # ─── Обработка вложений ───
     # если есть вложения
     # то проверяем их на соответсвие типа выбранному режиму user_modes
@@ -335,10 +337,11 @@ async def process_update(
         return
 
     # если команда то отправляем ее на обработку в bot_logic
+    # за исключением /start, там выводим кнопки
     if user_text.startswith("/"):
         command_parts = user_text.split(maxsplit=1)
         command = command_parts[0].lower()
-        if command == "/start":
+        if command == "/start" and permission != 1:
             text = "Большой блок информационного текста"
             await send_inline_message(user_id, text)
             return

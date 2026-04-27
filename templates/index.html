@@ -3,38 +3,48 @@
 {% block title %}Меню{% endblock %}
 
 {% block body %}
-<div class="menu-container">
-    <h1 class="menu-title">Выберите режим</h1>
+ <div id="status" class="position-fixed top-0 start-50 translate-middle-x mt-3"></div>
+    <div class="d-flex justify-content-center align-items-center min-vh-100 position-relative">
+        <div class="card" style="width: 24rem;">
+            <img src="static/img/sstlogo.jpg" class="card-img-top" alt="...">
+            <div class="card-body d-flex flex-column">
+                <h5 class="card-title">Бот Саранского строительного техникума</h5>
+                <p class="card-text">
+                    Этот бот — ваш умный навигатор по жизни техникума и миру СПО. <br>
+                    Он работает не как обычный поисковик, а как эксперт, который знает проверенные источники.<br>
+                    📚 В его базу загружена информация о специальностях, внутренние документы и 
+                    документы РФ: законы, приказы, письма и разъяснения. <br>
+                    ⚠️ Важно: Для принятия юридически значимых решений сверяйтесь с оригиналами документов.
+                </p>
+                <div class="d-flex justify-content-center mt-auto">
+                    <button type="button" 
+                        class="btn btn-success"
+                        onclick="sendCommand('/gigachat');">
+                        <i class="fa fa-commenting-o"></i> Задать вопрос ИИ ССТ
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+       
+{% endblock %}
 
-    <div id="status" class="alert alert-info mb-3" style="display: none;"></div>
-
-    <div class="d-grid gap-2 d-md-block">
-        <button type="button" class="btn btn-success" onclick="sendCommand('/gigachat'); return false;">
-            <i class="fa fa-address-book" aria-hidden="true"></i> Чат с ИИ
-        </button>
-        <button type="button"  class="btn btn-success" onclick="sendCommand('/file'); return false;">
-            <i class="fa fa-file-text"></i> Анализ файлов
-        </button>
-        <button type="button"  class="btn btn-success" onclick="sendCommand('/edit'); return false;">
-            <i class="fa fa-image"></i> Изображения
-        </button>
-        <button type="button"  class="btn btn-success" onclick="sendCommand('/guestrag'); return false;">
-            <i class="fa fa-robot"></i> ИИ Агент
-        </button>
-        <a href="#"
-            class="btn btn-success"
-            name="billing"
-            onclick="sendCommand('/billing'); return false;">
-            <i class="fa fa-credit-card"></i> Оплата
-        </a>
-</div>
-</div>
-
+{% block scripts %}
 <script>
+console.log('Script loaded, WebApp:', window.WebApp);
+window.addEventListener('load', function() {
+    console.log('Window loaded, checking WebApp:', window.WebApp);
+    if (window.WebApp) {
+        window.WebApp.ready();
+        console.log('WebApp ready called');
+    }
+});
+
 function showStatus(message, isError = false) {
     const statusEl = document.getElementById('status');
+    if (!statusEl) return;
     statusEl.textContent = message;
-    statusEl.className = 'alert alert-' + (isError ? 'danger' : 'success') + ' mb-3';
+    statusEl.className = 'alert alert-' + (isError ? 'danger' : 'success');
     statusEl.style.display = 'block';
     if (!isError) {
         setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
@@ -42,10 +52,7 @@ function showStatus(message, isError = false) {
 }
 
 function getUserId() {
-    // 1. Пробуем из MAX Bridge
     let user_id = window.WebApp?.initDataUnsafe?.user?.id;
-    
-    // 2. Fallback: из URL fragment (после #)
     if (!user_id) {
         const hashParams = new URLSearchParams(window.location.hash.slice(1));
         const webAppData = hashParams.get('WebAppData');
@@ -59,34 +66,62 @@ function getUserId() {
             }
         }
     }
-    
-    // 3. Fallback: из URL query (после ?)
     if (!user_id) {
         const params = new URLSearchParams(window.location.search);
         user_id = params.get('user_id');
     }
-    
     return user_id;
+}
+
+function getUserName() {
+    let user_name = window.WebApp?.initDataUnsafe?.user?.first_name;
+    if (!user_name) {
+        const hashParams = new URLSearchParams(window.location.hash.slice(1));
+        const webAppData = hashParams.get('WebAppData');
+        if (webAppData) {
+            const params = new URLSearchParams(webAppData);
+            const userData = params.get('user');
+            if (userData) {
+                try {
+                    const user = JSON.parse(userData);
+                    user_name = user.first_name;
+                    if (user.last_name) user_name += ' ' + user.last_name;
+                } catch (e) {}
+            }
+        }
+    }
+    return user_name || 'Unknown';
 }
 
 async function sendCommand(command) {
     const user_id = getUserId();
+    const user_name = getUserName();
     
     if (!user_id) {
-        showStatus('User ID не получен. URL: ' + window.location.href.substring(0, 100) + '...', true);
+        showStatus('User ID не получен. Попробуйте обновить приложение.', true);
         return;
     }
-    showStatus('URL: ' + window.location.href.substring(0, 100) + '...', true);
         
     try {
         const response = await fetch('/api/send-command', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({command: command, user_id: user_id})
+            body: JSON.stringify({command: command, user_id: user_id, user_name: user_name})
         });
         const result = await response.json();
         if (result.success) {
             showStatus('Команда "' + command + '" отправлена!');
+            setTimeout(() => {
+                console.log('Trying to close...', window.WebApp);
+                if (window.WebApp && typeof window.WebApp.close === 'function') {
+                    window.WebApp.close();
+                } else if (window.MaxWebApp && typeof window.MaxWebApp.close === 'function') {
+                    window.MaxWebApp.close();
+                } else {
+                    console.log('WebApp not found, trying redirect');
+                    window.location.href = 'max://close';
+                }
+            }, 500);
         } else {
             showStatus('Ошибка: ' + (result.detail || 'Unknown'), true);
         }

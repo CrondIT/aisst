@@ -27,6 +27,8 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
     user_name = sender.get("name", "Неизвестный пользователь")
     user_id = sender.get("user_id")
     user_data = await db.get_user(user_id)
+    if user_data["permission"] == 1:
+        command = "/gigachat"  # если пользователь гость то только один режим
 
     if command == "/billing":
         if user_data:
@@ -121,4 +123,3 @@ async def transcribe_audio(audio_data: bytes, ext: str) -> str | None:
     """Заглушка для транскрибации аудио."""
     logger.warning("transcribe_audio вызван, но не реализован")
     return None
-
