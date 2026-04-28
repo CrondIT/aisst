@@ -94,12 +94,12 @@ async def send_message(user_id: int, text: str) -> int | None:
 
 
 BUTTONS = [
-    {"text": "Чат с ИИ", "command": "gigachat"},
-    {"text": "Анализ файлов", "command": "file"},
-    {"text": "Изображения", "command": "edit"},
-    {"text": "ИИ Агент", "command": "guestrag"},
-    {"text": "Настройки", "command": "settings"},
-    {"text": "Оплата", "command": "billing"},
+    {"text": "Чат с ИИ", "command": "/gigachat"},
+    {"text": "Анализ файлов", "command": "/file"},
+    {"text": "Изображения", "command": "/edit"},
+    {"text": "ИИ Агент", "command": "/guestrag"},
+    {"text": "Настройки", "command": "/settings"},
+    {"text": "Оплата", "command": "/billing"},
 ]
 
 
@@ -229,25 +229,34 @@ async def process_update(
         background_tasks: BackgroundTasks = None
 ) -> None:
     """Обработка одного обновления."""
+
+    # 1. Определение типа обновления
     update_type = update.get("update_type")
 
+    # Обрабатывает два типа: message_callback (нажатия на кнопки)
+    #  и message_created (сообщения).
     if update_type == "message_callback":
         callback_obj = update.get("callback", {})
         sender = callback_obj.get("user", {})
         user_id = sender.get("user_id")
         callback_data = callback_obj.get("payload", "")
         logger.info(f"Callback от {sender.get('name')}: {callback_data}")
+
+        # 2. Обработка callback-кнопок
+        # если нажатие на кнопки то это точно команда
         if callback_data and user_id:
             command_response = await bot_logic.handle_command(
-                "/" + callback_data, sender
+                callback_data, sender
             )
             if command_response is not None:
                 await send_message(user_id, command_response)
         return
 
+    # 3. Фильтрация по типу
     if update_type != "message_created":
         return
 
+    # 4. Пропуск старых сообщений
     message = update.get("message", {})
     message_created_at = message.get("created_at")
     if (
@@ -257,21 +266,26 @@ async def process_update(
     ):
         logger.info(f"Пропущено старое сообщение: {message.get('message_id')}")
         return
+
+    # 5. Извлечение данных сообщения
     sender = message.get("sender", {})
     body = message.get("body", {})
-
     user_id = sender.get("user_id")
     user_text = body.get("text", "")
 
+    # 6. Фильтр ботов (бот не отвечает на сообщения других ботов)
     if sender.get("is_bot"):
-        return  # возврат если сообщение от бота
+        return
 
+    # 7. ограничение запросов в минуту (хранится в _rate_limit_store).
     if not _check_rate_limit(user_id):  # вовзврат если слишком много запросов
         logger.warning(f"Rate limit превышен для user_id={user_id}")
         await send_message(
             user_id, "Превышен лимит запросов. Попробуйте через минуту."
         )
         return
+
+    # 8. Регистрация пользователя
     # создаем пользователя если его нет в базе
     # (и базу с таблицами), все проверки уже есть в db
     nickname = sender.get("name", f"user_{user_id}")
@@ -280,15 +294,16 @@ async def process_update(
     user_data = await db.get_user(user_id)
     permission = user_data["permission"]
     print(nickname, permission)
-    # ─── Обработка вложений ───
-    # если есть вложения
-    # то проверяем их на соответсвие типа выбранному режиму user_modes
-    # и сохраняем их в папке temp, если тип подходит под режим
+
+    # 9. Обработка вложений
+    # если есть вложения то сохраняем их в папке temp
     # и отправляем на обработку в bot_logic
+    # который их обрабатывает в зависимости от user_modes[user_id]
     attachments = body.get("attachments", [])
     attr_url = None
     for att in attachments:
         attr_url = att.get("payload", {}).get("url")
+        # обработка аудио
         if att.get("type") == "audio":
             voice_url = attr_url
             if voice_url and not user_text:
@@ -299,9 +314,11 @@ async def process_update(
                 await send_message(user_id, "Не распознаю голосовое ...")
                 return
             break
+        # обработка изображений
         if att.get("type") == "image" and attr_url:
             # image_path = await save_user_image(attr_url, user_id)
             pass
+        # обработка файлов
         if att.get("type") == "file" and attr_url:
             filename = att.get("filename")
             if not filename:
@@ -336,6 +353,7 @@ async def process_update(
         logger.warning(f"Пропущено: user_id={user_id}, text={user_text}")
         return
 
+    # 10. Обработка текстовых команд
     # если команда то отправляем ее на обработку в bot_logic
     # за исключением /start, там выводим кнопки
     if user_text.startswith("/"):

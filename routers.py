@@ -64,7 +64,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     if isinstance(data, list):
         for update_item in data:
-            await max_api.process_update(update_item, request, background_tasks)
+            await max_api.process_update(
+                update_item, request, background_tasks
+            )
     else:
         await max_api.process_update(data, request, background_tasks)
 
