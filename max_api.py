@@ -232,18 +232,19 @@ async def process_update(
 
     # 1. Определение типа обновления
     update_type = update.get("update_type")
-
+    
+    # 2. Обработка callback-кнопок
     # Обрабатывает два типа: message_callback (нажатия на кнопки)
     #  и message_created (сообщения).
+    # обрабатываем нажатие на кнопку
     if update_type == "message_callback":
         callback_obj = update.get("callback", {})
         sender = callback_obj.get("user", {})
         user_id = sender.get("user_id")
         callback_data = callback_obj.get("payload", "")
         logger.info(f"Callback от {sender.get('name')}: {callback_data}")
-
-        # 2. Обработка callback-кнопок
-        # если нажатие на кнопки то это точно команда
+        # если есть данные команды и определен пользователь 
+        # то обрабатываем команду
         if callback_data and user_id:
             command_response = await bot_logic.handle_command(
                 callback_data, sender
@@ -252,10 +253,11 @@ async def process_update(
                 await send_message(user_id, command_response)
         return
 
-    # 3. Фильтрация по типу
+    # 3. Фильтрация по типу, если нет сообщения то выходим
     if update_type != "message_created":
         return
 
+    # сообщение получено, обрабатываем его
     # 4. Пропуск старых сообщений
     message = update.get("message", {})
     message_created_at = message.get("created_at")
@@ -274,10 +276,11 @@ async def process_update(
     user_text = body.get("text", "")
 
     # 6. Фильтр ботов (бот не отвечает на сообщения других ботов)
+    # если от бота то выходим
     if sender.get("is_bot"):
         return
 
-    # 7. ограничение запросов в минуту (хранится в _rate_limit_store).
+    # 7. Ограничение запросов в минуту (хранится в _rate_limit_store).
     if not _check_rate_limit(user_id):  # вовзврат если слишком много запросов
         logger.warning(f"Rate limit превышен для user_id={user_id}")
         await send_message(
@@ -287,7 +290,7 @@ async def process_update(
 
     # 8. Регистрация пользователя
     # создаем пользователя если его нет в базе
-    # (и базу с таблицами), все проверки уже есть в db
+    # (и базу с таблицами), все проверки уже есть в модуле db
     nickname = sender.get("name", f"user_{user_id}")
     if await db.create_user(user_id, nickname):
         logger.info(f"Создан пользователь: {nickname} (id={user_id})")
@@ -355,7 +358,9 @@ async def process_update(
 
     # 10. Обработка текстовых команд
     # если команда то отправляем ее на обработку в bot_logic
-    # за исключением /start, там выводим кнопки
+    # за исключением /start, там выводим кнопки,
+    # также проверяем разрешения permission = 1 это гость и не выводим кнопки,
+    # у гостя право только на один режим
     if user_text.startswith("/"):
         command_parts = user_text.split(maxsplit=1)
         command = command_parts[0].lower()

@@ -89,8 +89,11 @@ async def get_loader_for_file(file_path: str):
         ".pdf": PyPDFLoader,
         "pdf": PyPDFLoader,
         ".docx": Docx2txtLoader,
+        "docx": Docx2txtLoader,
         ".doc": Docx2txtLoader,
+        "doc": Docx2txtLoader,
         ".txt": TextLoader,
+        "txt": TextLoader,
     }
     if ext not in loaders:
         logger.warning(f"Формат {ext} не поддерживается")
