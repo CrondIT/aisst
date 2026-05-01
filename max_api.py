@@ -23,7 +23,7 @@ from utils import (
 from fastapi import Request
 from starlette.background import BackgroundTasks
 import os
-
+from audio2text_salutespeech import transcribe_audio
 
 async def _process_file_async(
         file_path: str,
@@ -314,9 +314,44 @@ async def process_update(
                     f"Голосовое сообщение от {sender.get('name')} "
                     f"(user_id={user_id})"
                 )
-                await send_message(user_id, "Не распознаю голосовое ...")
+                await send_message(
+                    user_id,
+                    "Начинаю распознавание голосового сообщения ... "
+                )
+                # MAX API не всегда передает filename для аудио, генерируем сами
+                filename = att.get("filename")
+                if not filename:
+                    # Используем mid сообщения как имя, формат ogg (стандарт для MAX)
+                    mid = body.get("mid", str(user_id))
+                    filename = f"voice_{mid}.ogg"
+                    logger.info(f"Имя файла сгенерировано: {filename}")
+
+                ext = filename.split('.')[-1].lower()
+                if not ext:  # Если расширение не определено, ставим ogg
+                    ext = "ogg"
+                    filename = f"{filename}.{ext}"
+
+                name = os.path.splitext(filename)[0]
+                file_path = await save_user_file(
+                    attr_url, user_id, ext, "voice", name
+                )
+                if not file_path:
+                    await send_message(user_id, "Ошибка загрузки аудиофайла.")
+                    return
+
+                # Запускаем распознавание в фоне
+                async def _process_audio_wrapper():
+                    try:
+                        recognized_text = await transcribe_audio(file_path)
+                        await send_message(user_id, recognized_text)
+                    except Exception as e:
+                        logger.error(f"Ошибка распознавания аудио: {e}")
+                        await send_message(
+                            user_id, "Не удалось распознать аудио."
+                        )
+
+                asyncio.create_task(_process_audio_wrapper())
                 return
-            break
         # обработка изображений
         if att.get("type") == "image" and attr_url:
             # image_path = await save_user_image(attr_url, user_id)

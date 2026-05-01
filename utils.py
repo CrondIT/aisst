@@ -14,7 +14,7 @@ from global_state import (
     TEMP_DIR,
     MAX_BASE_URL,
     MAX_API_TOKEN,
-    )
+)
 
 
 async def send_message_from_file(user_id: int, text: str) -> int | None:
@@ -153,6 +153,9 @@ async def save_user_image(image_url: str, user_id: int) -> str | None:
             filename = f"photo_{user_id}_{timestamp}.jpg"
             filepath = os.path.join(TEMP_DIR, filename)
 
+            # Создаем папку temp, если её нет
+            os.makedirs(TEMP_DIR, exist_ok=True)
+
             image.save(filepath, "JPEG", quality=95)
             logger.info(f"Сохранено изображение: {filepath}")
             return filepath
@@ -182,10 +185,12 @@ async def save_user_file(
                 "Content-Type", ""
             ).split(";")[0].strip()
 
-            # timestamp = int(datetime.now().timestamp() * 1000)
             name = name[:90] if len(name) > 90 else name
             filename = f"{default_name}_{user_id}_{name}.{ext}"
             filepath = os.path.join(TEMP_DIR, filename)
+
+            # Создаем папку temp, если её нет
+            os.makedirs(TEMP_DIR, exist_ok=True)
 
             with open(filepath, "wb") as f:
                 f.write(content)

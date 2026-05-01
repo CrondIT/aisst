@@ -44,6 +44,13 @@ GIGACHAT_API_KEY = os.getenv("GIGACHAT_API_KEY")
 GIGACHAT_SCOPE = os.getenv("GIGACHAT_SCOPE") or "GIGACHAT_API_PERS"
 RUS_TRUSTED_ROOT_CA_PEM = os.getenv("RUS_TRUSTED_ROOT_CA_PEM")
 
+# Данные для подключения к SaluteSpeech
+SALUTE_CLIENT_ID = os.getenv("SALUTE_CLIENT_ID")
+SALUTE_SCOPE = os.getenv("SALUTE_SCOPE")
+SALUTE_SPEECH_AUTH_KEY = os.getenv("SALUTE_SPEECH_AUTH_KEY")
+SALUTE_SPEECH_OAUTH_URL = os.getenv("SALUTE_SPEECH_OAUTH_URL")
+SALUTE_SPEECH_BASE_URL = os.getenv("SALUTE_SPEECH_BASE_URL")
+
 # Данные для подключения к OpenAI и Gemini
 # Получаем токены для разных режимов
 OPENAI_API_KEY_CHAT = os.getenv("OPENAI_API_KEY")

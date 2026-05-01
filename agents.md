@@ -4,7 +4,7 @@
 LLM и Эмбеддинги: Исключительно GigaChat (через langchain_community.chat_models и GigaChatEmbeddings).
 Векторное хранилище: ChromaDB.
 Платформа: Мессенджер "MAX" (Россия).
-Есть API ключи для GigaChat и GigaChatEmbeddings
+Есть API ключи для GigaChat, GigaChatEmbeddings, SaluteSpeech
 Текущее состояние:
 Основной каркас приложения на FastAPI уже создан. Мне нужна помощь в реализации конкретных модулей, логики RAG и интеграции компонентов.
 Мои технические требования:
@@ -25,3 +25,7 @@ https://developers.sber.ru/docs/ru/gigachat/models/gigachat-2-lite
 https://developers.sber.ru/docs/ru/gigachat/models/embeddings
 https://developers.sber.ru/docs/ru/gigachat/models/embeddings-2
 https://developers.sber.ru/docs/ru/gigachat/guides/working-with-files
+
+https://developers.sber.ru/docs/ru/salutespeech/api/authentication
+https://developers.sber.ru/docs/ru/salutespeech/rest/post-token
+https://developers.sber.ru/docs/ru/salutespeech/rest/async-general

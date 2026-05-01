@@ -118,8 +118,3 @@ async def handle_file(file_name: str, sender: dict) -> str | None:
         )
     return "Режим еще не работает"
 
-
-async def transcribe_audio(audio_data: bytes, ext: str) -> str | None:
-    """Заглушка для транскрибации аудио."""
-    logger.warning("transcribe_audio вызван, но не реализован")
-    return None
