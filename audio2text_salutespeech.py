@@ -12,9 +12,6 @@ from global_state import (
     SALUTE_SPEECH_BASE_URL,
 )
 
-# Конфигурация с значениями по умолчанию
-OAUTH_URL = SALUTE_SPEECH_OAUTH_URL or "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
-BASE_URL = SALUTE_SPEECH_BASE_URL or "https://smartspeech.sber.ru/rest/v1"
 
 # Кэш токена
 _cached_token: Optional[str] = None
@@ -37,110 +34,108 @@ def _get_client() -> httpx.AsyncClient:
 async def get_access_token() -> str:
     """Получает Access Token для SaluteSpeech API с кэшированием."""
     global _cached_token, _token_expires_at
-    
+
     # Если токен еще валиден (оставляем запас 60 сек), возвращаем его
     if _cached_token and time.time() < _token_expires_at - 60:
         return _cached_token
-    print("SALUTE_SPEECH_AUTH_KEY ", SALUTE_SPEECH_AUTH_KEY)
     if not SALUTE_SPEECH_AUTH_KEY:
+        logger.error("SALUTE_SPEECH_AUTH_KEY не задан в .env")
         raise ValueError("SALUTE_SPEECH_AUTH_KEY не задан в .env")
 
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
         "Accept": "application/json",
         "RqUID": str(uuid.uuid4()),
-        "Authorization": f"Basic {SALUTE_SPEECH_AUTH_KEY}"
+        "Authorization": f"Basic {SALUTE_SPEECH_AUTH_KEY}",
     }
     # Scope: SALUTE_SPEECH_PERS (физлица) или SALUTE_SPEECH_CORP (юрлица)
     payload = {"scope": "SALUTE_SPEECH_PERS"}
 
     async with _get_client() as client:
         try:
-            logger.info(f"Запрос токена SaluteSpeech: {OAUTH_URL}")
-            response = await client.post(OAUTH_URL, headers=headers, data=payload)
-            
+            response = await client.post(
+                SALUTE_SPEECH_OAUTH_URL, headers=headers, data=payload
+            )
+
             if response.status_code != 200:
                 # Логируем тело ответа при ошибке для диагностики
                 error_text = response.text
-                logger.error(f"Ошибка получения токена: {response.status_code} - {error_text}")
+                logger.error(
+                    f"Ошибка получения токена: {response.status_code} - "
+                    f"{error_text}"
+                )
                 raise Exception(f"SaluteSpeech Auth Error: {error_text}")
-            
+
             response.raise_for_status()
             data = response.json()
-            
+
             _cached_token = data["access_token"]
             # expires_at в миллисекундах, переводим в секунды
             _token_expires_at = data["expires_at"] / 1000
-            
-            logger.info("Токен SaluteSpeech успешно получен")
+
             return _cached_token
-            
+
         except Exception as e:
             logger.error(f"Исключение при запросе токена: {e}")
             raise
 
 
-async def upload_file(file_path: str, token: str) -> str:
-    """Загружает аудиофайл на сервер SaluteSpeech и возвращает data_id."""
-    url = f"{BASE_URL}/data/upload"
-    headers = {"Authorization": f"Bearer {token}"}
+async def create_recognition_task(file_path: str, token: str) -> str:
+    """Создает задачу на распознавание аудио и возвращает task_id."""
+    url = (
+        f"{SALUTE_SPEECH_BASE_URL}/speech:recognize?model=general&language=ru-RU"
+    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "audio/ogg;codecs=opus",
+    }
 
     async with _get_client() as client:
         with open(file_path, "rb") as f:
-            files = {"file": (os.path.basename(file_path), f, "audio/ogg")}
-            response = await client.post(url, headers=headers, files=files)
-            
-            if response.status_code != 200:
-                logger.error(f"Ошибка загрузки файла: {response.status_code} - {response.text}")
-                response.raise_for_status()
-            
-            return response.json()["data_id"]
+            response = await client.post(
+                url, headers=headers, content=f.read()
+            )
 
-
-async def create_recognition_task(data_id: str, token: str) -> str:
-    """Создает задачу на распознавание аудио и возвращает task_id."""
-    url = f"{BASE_URL}/speech:recognize"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "data_id": data_id,
-        "model": "general",
-        "language": "ru-RU"
-    }
-
-    async with _get_client() as client:
-        response = await client.post(url, headers=headers, json=payload)
-        
         if response.status_code != 200:
-            logger.error(f"Ошибка создания задачи: {response.status_code} - {response.text}")
+            logger.error(
+                f"Ошибка создания задачи: {response.status_code} - "
+                f"{response.text}"
+            )
             response.raise_for_status()
-            
-        return response.json()["task_id"]
+
+        data = response.json()
+        # Согласно документации SaluteSpeech: result.task_id
+        return data["result"]["task_id"]
 
 
-async def wait_for_task_completion(task_id: str, token: str, timeout: int = 60) -> dict:
+async def wait_for_task_completion(
+        task_id: str, token: str, timeout: int = 60
+    ) -> dict:
     """Ожидает завершения задачи и возвращает результат."""
-    url = f"{BASE_URL}/task/{task_id}"
+    url = f"{SALUTE_SPEECH_BASE_URL}/task:{task_id}"
     headers = {"Authorization": f"Bearer {token}"}
-    
+
     start_time = time.time()
-    
+
     async with _get_client() as client:
         while time.time() - start_time < timeout:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
             task_data = response.json()
-            
-            status = task_data.get("status")
+
+            # Согласно документации SaluteSpeech, статус внутри result
+            status = task_data.get("result", {}).get("status") or task_data.get(
+                "status"
+            )
             if status == "done":
                 return task_data
             elif status == "error":
-                raise Exception(f"Ошибка распознавания: {task_data.get('error')}")
-            
+                raise Exception(
+                    f"Ошибка распознавания: {task_data.get('error')}"
+                )
+
             await asyncio.sleep(2)
-    
+
     raise TimeoutError("Превышено время ожидания результата распознавания")
 
 
@@ -154,37 +149,67 @@ async def transcribe_audio(file_path: str) -> str:
         raise FileNotFoundError(f"Файл не найден: {file_path}")
 
     token = await get_access_token()
-    
-    logger.info(f"Загрузка файла {file_path} в SaluteSpeech...")
-    data_id = await upload_file(file_path, token)
-    
-    logger.info(f"Создание задачи распознавания для data_id: {data_id}")
-    task_id = await create_recognition_task(data_id, token)
-    
-    logger.info(f"Ожидание результата задачи: {task_id}")
-    result = await wait_for_task_completion(task_id, token)
-    
-    # Парсинг результата SaluteSpeech
-    try:
-        res_data = result.get("result", {})
-        
-        # Вариант 1: Список слов (words)
-        if "words" in res_data:
-            words = res_data["words"]
+
+    # Прямая отправка аудио
+    url = (
+        f"{SALUTE_SPEECH_BASE_URL}/speech:recognize?model=general&language=ru-RU"
+    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "audio/ogg;codecs=opus",
+    }
+
+    async with _get_client() as client:
+        with open(file_path, "rb") as f:
+            response = await client.post(
+                url, headers=headers, content=f.read()
+            )
+
+        if response.status_code != 200:
+            logger.error(
+                f"Ошибка распознавания: {response.status_code} - "
+                f"{response.text}"
+            )
+            response.raise_for_status()
+
+        data = response.json()
+        return parse_speech_response(data)
+
+
+def parse_speech_response(data: dict) -> str:
+    """Парсит ответ от SaluteSpeech API."""
+    result = data.get("result")
+
+    # Вариант 1: Синхронный ответ (список строк)
+    if isinstance(result, list):
+        text_parts = [str(item).strip() for item in result if item]
+        return " ".join(text_parts).strip()
+
+    # Вариант 2: Асинхронный ответ (словарь с task_id)
+    if isinstance(result, dict):
+        # Если есть task_id, значит нужно ждать завершения
+        if "task_id" in result:
+            # Этот случай пока оставляем для обратной совместимости
+            # В реальности сейчас API возвращает результат сразу
+            pass
+
+        # Парсинг финального результата (если пришел сразу)
+        # Список слов (words)
+        if "words" in result:
+            words = result["words"]
             text = " ".join([w.get("word", "") for w in words])
             return text.strip()
-        
-        # Вариант 2: Список сегментов (segments)
-        if "segments" in res_data:
-            segments = res_data["segments"]
+
+        # Список сегментов (segments)
+        if "segments" in result:
+            segments = result["segments"]
             text = " ".join([seg.get("text", "") for seg in segments])
             return text.strip()
-            
-        # Вариант 3: Прямой текст
-        if "text" in res_data:
-            return res_data["text"].strip()
-            
-    except Exception as e:
-        logger.error(f"Ошибка парсинга результата: {e}")
-    
-    return str(result)
+
+        # Прямой текст
+        if "text" in result:
+            return result["text"].strip()
+
+    # Если ничего не подошло
+    logger.warning(f"Неизвестный формат результата: {data}")
+    return str(data)

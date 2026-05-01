@@ -310,21 +310,15 @@ async def process_update(
         if att.get("type") == "audio":
             voice_url = attr_url
             if voice_url and not user_text:
-                logger.info(
-                    f"Голосовое сообщение от {sender.get('name')} "
-                    f"(user_id={user_id})"
-                )
                 await send_message(
                     user_id,
                     "Начинаю распознавание голосового сообщения ... "
                 )
-                # MAX API не всегда передает filename для аудио, генерируем сами
+                # MAX API не всегда передает filename для аудио, 
+                # генерируем сами
                 filename = att.get("filename")
                 if not filename:
-                    # Используем mid сообщения как имя, формат ogg (стандарт для MAX)
-                    mid = body.get("mid", str(user_id))
-                    filename = f"voice_{mid}.ogg"
-                    logger.info(f"Имя файла сгенерировано: {filename}")
+                    filename = "voice.ogg"
 
                 ext = filename.split('.')[-1].lower()
                 if not ext:  # Если расширение не определено, ставим ogg
@@ -344,6 +338,7 @@ async def process_update(
                     try:
                         recognized_text = await transcribe_audio(file_path)
                         await send_message(user_id, recognized_text)
+                        return recognized_text
                     except Exception as e:
                         logger.error(f"Ошибка распознавания аудио: {e}")
                         await send_message(
@@ -351,7 +346,7 @@ async def process_update(
                         )
 
                 asyncio.create_task(_process_audio_wrapper())
-                return
+                # return
         # обработка изображений
         if att.get("type") == "image" and attr_url:
             # image_path = await save_user_image(attr_url, user_id)

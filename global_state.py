@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 
 # Global variables that need to be accessible across the entire project
 user_contexts = {}  # Хранилище контекста для каждого пользователя и режима
@@ -17,7 +18,8 @@ user_edit_images_queue = {}
 MAX_CONTEXT_MESSAGES = 5
 MAX_REF_IMAGES = 6  # Максимальное количество изображений для редактирования
 
-load_dotenv(override=True)
+load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
+# load_dotenv(override=True)
 # разрешенные расширения для разных режимов
 # ext in ALLOWED_EXTENSIONS.get("guestrag") -> True или False
 ALLOWED_EXTENSIONS = {
@@ -34,7 +36,7 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 
 # Данные бота
 MAX_API_TOKEN = os.getenv("MAX_API_TOKEN")
-MAX_BASE_URL = os.getenv("MAX_BASE_URL") or "https://platform-api.max.ru"
+MAX_BASE_URL = os.getenv("MAX_BASE_URL")
 MAX_DB_PATH = os.getenv("MAX_DB_PATH")
 
 # Данные для подключения к GigaChat

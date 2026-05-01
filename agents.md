@@ -29,3 +29,6 @@ https://developers.sber.ru/docs/ru/gigachat/guides/working-with-files
 https://developers.sber.ru/docs/ru/salutespeech/api/authentication
 https://developers.sber.ru/docs/ru/salutespeech/rest/post-token
 https://developers.sber.ru/docs/ru/salutespeech/rest/async-general
+https://developers.sber.ru/docs/ru/salutespeech/rest/post-data-upload
+https://developers.sber.ru/docs/ru/salutespeech/guides/recognition/recognition-ways
+https://developers.sber.ru/docs/ru/salutespeech/api/grpc/recognition-stream-2
