@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from global_state import ADMIN_API_TOKEN, TEMP_DIR
 import bot_logic
 import max_api
+import max_webhook_handler
 
 logger = logging.getLogger(__name__)
 
@@ -60,15 +61,15 @@ async def index(request: Request):
 @router.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
     """Endpoint для приёма webhook-обновлений от MAX."""
-    _, data = await max_api.handle_webhook(request)
+    _, data = await max_webhook_handler.handle_webhook(request)
 
     if isinstance(data, list):
         for update_item in data:
-            await max_api.process_update(
+            await max_webhook_handler.process_update(
                 update_item, request, background_tasks
             )
     else:
-        await max_api.process_update(data, request, background_tasks)
+        await max_webhook_handler.process_update(data, request, background_tasks)
 
     return JSONResponse(content={"status": "ok"})
 
