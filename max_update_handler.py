@@ -4,10 +4,6 @@ import asyncio
 import time
 from collections import defaultdict
 from global_state import (
-    MAX_API_TOKEN,
-    MAX_BASE_URL,
-    WEBHOOK_URL,
-    WEBHOOK_SECRET,
     TRUSTED_WEBHOOK_IPS,
     RATE_LIMIT_PER_MINUTE,
     ALLOWED_EXTENSIONS,
@@ -28,6 +24,42 @@ import max_api
 
 # ─── Rate limiting ───
 _rate_limit_store: dict[int, list[float]] = defaultdict(list)
+
+
+async def _process_audio_and_respond(
+    request: Request,
+    file_path: str,
+    user_id: int,
+    sender: dict
+) -> None:
+    """Распознавание аудио и передача текста в bot_logic."""
+    try:
+        recognized_text = await transcribe_audio(file_path)
+        if not recognized_text:
+            await max_api.send_message(
+                user_id, "Не удалось распознать аудио."
+            )
+            return
+        
+        reply_text = await bot_logic.handle_message(
+            request, recognized_text, sender
+        )
+        await max_api.send_message(user_id, recognized_text)
+        if not reply_text:
+            logger.error(f"Пустой ответ для пользователя: {user_id}")
+            await max_api.send_message(
+                user_id, "Извините, не смог сформировать ответ."
+            )
+            return
+        
+        await max_api.send_message(user_id, reply_text)
+    except Exception as e:
+        logger.error(
+            f"Ошибка обработки голосового сообщения: {e}", exc_info=True
+        )
+        await max_api.send_message(
+            user_id, "Произошла ошибка при обработке голосового сообщения."
+        )
 
 
 def _check_rate_limit(user_id: int) -> bool:
@@ -104,7 +136,9 @@ async def process_update(
         and lifespan.SERVER_START_TIME
         and message_created_at < lifespan.SERVER_START_TIME.isoformat()
     ):
-        logger.info(f"Пропущено старое сообщение: {message.get('message_id')}")
+        logger.info(
+            f"Пропущено старое сообщение: {message.get('message_id')}"
+        )
         return
 
     # 4. Извлечение данных сообщения
@@ -159,21 +193,16 @@ async def process_update(
                     attr_url, user_id, ext, "voice", name
                 )
                 if not file_path:
-                    await max_api.send_message(user_id, "Ошибка загрузки аудиофайла.")
+                    await max_api.send_message(
+                        user_id, "Ошибка загрузки аудиофайла."
+                    )
                     return
+                asyncio.create_task(
+                    _process_audio_and_respond(
+                        request, file_path, user_id, sender
+                    )
+                )
 
-                async def _process_audio_wrapper():
-                    try:
-                        recognized_text = await transcribe_audio(file_path)
-                        await max_api.send_message(user_id, recognized_text)
-                        return recognized_text
-                    except Exception as e:
-                        logger.error(f"Ошибка распознавания аудио: {e}")
-                        await max_api.send_message(
-                            user_id, "Не удалось распознать аудио."
-                        )
-
-                asyncio.create_task(_process_audio_wrapper())
         # Файлы
         if att.get("type") == "file" and attr_url:
             filename = att.get("filename")
@@ -192,7 +221,9 @@ async def process_update(
                     user_id,
                     f"Не удалось загрузить файл: {filename}"
                 )
-            await max_api.send_message(user_id, "Файл получен. Начинаю обработку...")
+            await max_api.send_message(
+                user_id, "Файл получен. Начинаю обработку..."
+            )
             if background_tasks:
                 background_tasks.add_task(
                     _process_file_async, file_path, sender, user_id
@@ -237,9 +268,6 @@ async def process_update(
                 user_id, "Извините, не смог сформировать ответ."
             )
             return
-
-        if len(reply_text) > 4000:
-            reply_text = reply_text[:3997] + "..."
 
         await max_api.send_message(user_id, reply_text)
     except Exception as e:

@@ -201,3 +201,64 @@ async def save_user_file(
     except Exception as e:
         logger.error(f"Ошибка сохранения файла: {e}")
         return None
+
+
+def split_long_message(
+        text: str, MESSAGE_LIMIT: int = 4096
+):
+    """
+    Разбивает  длинное сообщение на части,
+    если оно превышает лимит
+    """
+    text_parts = []
+    if len(text) <= MESSAGE_LIMIT:
+        # Message fits in a single message
+        text_parts.append(text)
+        return text_parts
+
+    # Split the message by paragraphs first to avoid breaking sentences
+    paragraphs = text.split("\n")
+
+    current_message = ""
+    for paragraph in paragraphs:
+        # Check if adding this paragraph would exceed the limit
+        if len(current_message) + len(paragraph) + 1 <= MESSAGE_LIMIT:
+            if current_message:
+                current_message += "\n" + paragraph
+            else:
+                current_message = paragraph
+        else:
+            # Send the current message if it's not empty
+            if current_message:
+                text_parts.append(current_message)
+
+            # If the single paragraph is too long, split it by sentences
+            if len(paragraph) > MESSAGE_LIMIT:
+                sentences = paragraph.split(". ")
+                temp_message = ""
+                for sentence in sentences:
+                    if (
+                        len(temp_message) + len(sentence) + 2
+                        <= MESSAGE_LIMIT
+                    ):
+                        if temp_message:
+                            temp_message += ". " + sentence
+                        else:
+                            temp_message = sentence
+                    else:
+                        if temp_message:
+                            text_parts.append(temp_message + ".")
+                        temp_message = sentence
+
+                # Add the last part if there's anything left
+                if temp_message:
+                    current_message = temp_message
+                else:
+                    current_message = ""
+            else:
+                current_message = paragraph
+
+    # Send the remaining message if there's anything left
+    if current_message:
+        text_parts.append(current_message)
+    return text_parts

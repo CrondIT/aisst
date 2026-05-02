@@ -7,33 +7,49 @@ from global_state import (
     WEBHOOK_URL,
     WEBHOOK_SECRET,
 )
-from utils import logger
+from utils import logger, split_long_message
+import asyncio
 
 
 async def send_message(user_id: int, text: str) -> int | None:
-    """Отправка сообщения через API MAX."""
+    """Отправка сообщения через API MAX. 
+       Автоматически разбивает текст на части, если он длиннее 4000 символов.
+    """
     url = f"{MAX_BASE_URL}/messages"
     headers = {
         "Authorization": MAX_API_TOKEN,
         "Content-Type": "application/json"
     }
     params = {"user_id": user_id}
-    payload = {"text": text}
-
+    
+    # Разбиваем сообщение на части
+    parts = split_long_message(text, MESSAGE_LIMIT=4000)
+    
     async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                url, headers=headers, params=params, json=payload
-            )
-            if response.status_code != 200:
-                logger.error(
-                    f"Ошибка отправки: "
-                    f"{response.status_code} — {response.text}"
+        last_status = None
+        for i, part in enumerate(parts):
+            payload = {"text": part}
+            try:
+                response = await client.post(
+                    url, headers=headers, params=params, json=payload
                 )
-            return response.status_code
-        except Exception as e:
-            logger.error(f"Исключение при отправке: {e}")
-            return None
+                last_status = response.status_code
+                if response.status_code != 200:
+                    logger.error(
+                        f"Ошибка отправки части {i+1}/{len(parts)}: "
+                        f"{response.status_code} — {response.text}"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Исключение при отправке части {i+1}/{len(parts)}: {e}"
+                )
+                last_status = None
+            
+            # Пауза между отправками для избежания rate limit
+            if i < len(parts) - 1:
+                await asyncio.sleep(0.1)
+        
+        return last_status
 
 
 BUTTONS = [
