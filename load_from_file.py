@@ -13,7 +13,6 @@ from langchain_chroma import Chroma
 from global_state import GUEST_RAG_DIR
 from rag_embeddings import get_giga_embeddings
 from utils import logger
-import shutil
 
 
 # ── Настройки сплиттера ─────────────────────────────────────────────────────
@@ -56,32 +55,20 @@ def _extract_name_from_filename(filename: str) -> str:
 
 def check_vector_db(persist_dir: str, embeddings):
     """
-    Загружает существующую векторную базу из persist_dir,
-    или создаёт новую пустую базу.
-    В случае повреждения данных удаляет папку и создаёт чистую базу.
+    Загружает или создает векторную базу.
+    При ошибке загрузки пробрасывает исключение.
     """
-    if os.path.isdir(persist_dir):
-        try:
-            db = Chroma(
-                persist_directory=persist_dir,
-                embedding_function=embeddings
-            )
-            logger.info(f"Загружена существующая база из {persist_dir}")
-            return db
-        except Exception as e:
-            logger.error(
-                f"Ошибка при загрузке базы из {persist_dir}: "
-                f"{e}. Удаляем повреждённую папку."
-            )
-            shutil.rmtree(persist_dir, ignore_errors=True)
-
     os.makedirs(persist_dir, exist_ok=True)
-    db = Chroma(
-        persist_directory=persist_dir,
-        embedding_function=embeddings
-    )
-    logger.info(f"Создана новая пустая векторная база в {persist_dir}")
-    return db
+    try:
+        db = Chroma(
+            persist_directory=persist_dir,
+            embedding_function=embeddings
+        )
+        logger.info(f"Инициализирована база в {persist_dir}")
+        return db
+    except Exception as e:
+        logger.error(f"Ошибка при инициализации базы {persist_dir}: {e}")
+        raise
 
 
 def is_file_in_vector_db(
@@ -158,6 +145,7 @@ async def _add_batch_with_retry(
     batch_docs: list,
     batch_start_idx: int,
     chunk_size: int,
+    file_id: str,
 ) -> tuple[bool, int]:
     """
     Пытается добавить батч документов в векторную базу.
@@ -169,6 +157,7 @@ async def _add_batch_with_retry(
         batch_start_idx: Глобальный индекс первого документа батча
                          (для генерации уникальных ID).
         chunk_size:      Текущий размер чанка в символах.
+        file_id:         Уникальный идентификатор файла (хеш) для ID чанков.
 
     Returns:
         (success: bool, actual_chunk_size: int)
@@ -180,7 +169,7 @@ async def _add_batch_with_retry(
     while current_chunk_size >= CHUNK_SIZE_MIN:
         try:
             ids = [
-                f"chunk_{batch_start_idx + j}"
+                f"{file_id}_chunk_{batch_start_idx + j}"
                 for j in range(len(current_docs))
             ]
             vector_db.add_documents(documents=current_docs, ids=ids)
@@ -287,6 +276,7 @@ async def save_to_vector_db(
             batch_docs=batch_docs,
             batch_start_idx=i,
             chunk_size=current_chunk_size,
+            file_id=file_id,
         )
 
         if success:
@@ -325,9 +315,16 @@ def get_all_filenames_from_vector_db(
     """
     embeddings = get_giga_embeddings(model_name)
     vector_db = check_vector_db(persist_dir, embeddings)
-    result = vector_db.get(include=["metadatas"])
+    
+    # Диагностика: сколько всего чанков в базе
+    all_data = vector_db.get(include=["metadatas"])
+    total_chunks = len(all_data.get("ids", []))
+    logger.info(f"get_all_filenames: в базе всего чанков: {total_chunks}")
+    
     filenames = set()
-    for metadata in result.get("metadatas", []):
+    metadatas = all_data.get("metadatas", [])
+    
+    for metadata in metadatas:
         filename = metadata.get("filename")
         if not filename:
             # Для старых документов извлекаем из source
@@ -335,9 +332,15 @@ def get_all_filenames_from_vector_db(
             filename = os.path.basename(source) if source else None
         if filename:
             filenames.add(filename)
+            
+    logger.info(
+        f"get_all_filenames: найдено уникальных имен: {len(filenames)} -"
+        f" {filenames}"
+    )
+    
     sorted_names = sorted(filenames)
     if not sorted_names:
-        return "База знаний пуста. Загрузите документы через /addoc.\n"
+        return "База знаний пуста. Загрузите документы.\n"
 
     # Поиск по имени файла, если передан search_text
     if search_text:
@@ -359,11 +362,40 @@ def delete_file_from_vector_db(
 ) -> str:
     """
     Удаляет документ из векторной базы по точному имени файла.
+    Использует стандартный метод delete с фильтром where.
     """
     embeddings = get_giga_embeddings(model_name)
     vector_db = check_vector_db(persist_dir, embeddings)
     try:
+        # Проверяем, есть ли такой файл в базе
+        result = vector_db.get(
+            where={"filename": file_name}, include=["metadatas"]
+        )
+        if not result or not result.get("ids"):
+            logger.warning(
+                f"Файл '{file_name}' не найден в базе для удаления."
+            )
+            return f"Файл '{file_name}' не найден в базе."
+
+        logger.info(
+            f"Удаление файла '{file_name}': "
+            f"найдено {len(result['ids'])} чанков."
+            )
+        
+        # Используем стандартный метод delete
         vector_db.delete(where={"filename": file_name})
+        
+        # Проверяем, что удаление прошло успешно
+        verify = vector_db.get(where={"filename": file_name}, include=[])
+        if verify and verify.get("ids"):
+            logger.error(
+                f"Файл '{file_name}' не был удален полностью. "
+                f"Осталось {len(verify['ids'])} чанков."
+            )
+            return f"Ошибка: файл '{file_name}' не был полностью удален."
+        
+        logger.info(f"Файл '{file_name}' успешно удален. Проверка пройдена.")
         return f"Файл '{file_name}' успешно удален из базы."
     except Exception as e:
+        logger.error(f"Ошибка при удалении файла '{file_name}': {e}")
         return f"Ошибка при удалении файла '{file_name}': {e}"
