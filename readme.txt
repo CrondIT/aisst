@@ -84,4 +84,68 @@ reply_text = await bot_logic.handle_message(request, user_text, sender)
 - db — работа с базой пользователей
 - _process_file_async() — асинхронная обработка файлов
 - send_message() / send_inline_message() — отправка ответов
+
+
+Вариант Б (Надёжный, гарантирует завершение)
+Если воркер может быть убит ДО завершения загрузки, нужен отдельный процесс.
+1. Создать простую очередь задач в global_state.py:
+import json
+from pathlib import Path
+# Очередь задач на диске (переживёт перезапуск воркера)
+QUEUE_FILE = Path("file_processing_queue.json")
+def add_to_queue(file_path: str, user_id: int):
+    """Добавить файл в очередь на обработку."""
+    queue = []
+    if QUEUE_FILE.exists():
+        queue = json.loads(QUEUE_FILE.read_text(encoding="utf-8"))
+    queue.append({
+        "file_path": file_path,
+        "user_id": user_id,
+        "status": "pending",
+        "created_at": time.time()
+    })
+    QUEUE_FILE.write_text(json.dumps(queue, ensure_ascii=False), encoding="utf-8")
+def get_pending_files():
+    """Получить файлы, ожидающие обработки."""
+    if not QUEUE_FILE.exists():
+        return []
+    return json.loads(QUEUE_FILE.read_text(encoding="utf-8"))
+2. Создать отдельный скрипт-воркер file_worker.py:
+# file_worker.py - отдельный процесс, который обрабатывает очередь
+import asyncio
+import json
+from pathlib import Path
+from load_from_file import save_to_vector_db
+QUEUE_FILE = Path("file_processing_queue.json")
+async def process_queue():
+    while True:
+        if QUEUE_FILE.exists():
+            queue = json.loads(QUEUE_FILE.read_text(encoding="utf-8"))
+            pending = [item for item in queue if item["status"] == "pending"]
+            
+            for item in pending:
+                try:
+                    # Обновляем статус
+                    item["status"] = "processing"
+                    QUEUE_FILE.write_text(json.dumps(queue, ensure_ascii=False), encoding="utf-8")
+                    
+                    # Обрабатываем
+                    result = await save_to_vector_db(
+                        file_path=item["file_path"],
+                        sender={"user_id": item["user_id"]},
+                        model_name="Embeddings"
+                    )
+                    
+                    item["status"] = "completed"
+                    item["result"] = result
+                except Exception as e:
+                    item["status"] = "failed"
+                    item["error"] = str(e)
+                
+                QUEUE_FILE.write_text(json.dumps(queue, ensure_ascii=False), encoding="utf-8")
+        
+        await asyncio.sleep(5)  # Проверяем очередь каждые 5 секунд
+if __name__ == "__main__":
+    asyncio.run(process_queue())
+3. Запуск: Запускать file_worker.py отдельно от основного бота (в отдельном терминале или как systemd-сервис).
     

@@ -20,7 +20,7 @@ import shutil
 # GigaChat Embeddings: лимит 514 токенов на чанк.
 # ~1000 символов ≈ 400-450 токенов для обычного текста — безопасный размер.
 # При 413 от API уменьшаем chunk_size вдвое (см. _split_with_retry).
-CHUNK_SIZE = 1000
+CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 150         # уменьшен с 200: меньше дублирования токенов
 CHUNK_SIZE_MIN = 200        # нижняя граница — меньше нет смысла дробить
 CHUNK_SIZE_DIVISOR = 2      # коэффициент уменьшения при retry
@@ -32,6 +32,26 @@ def get_file_hash(file_path):
         for chunk in iter(lambda: f.read(4096), b""):
             hash_sha256.update(chunk)
     return hash_sha256.hexdigest()
+
+
+def _extract_name_from_filename(filename: str) -> str:
+    """
+    Извлекает часть {name} из имени файла формата
+    f"{default_name}_{user_id}_{name}.{ext}".
+    
+    Args:
+        filename: Полное имя файла (например, "rag_12345_ustav.pdf")
+    
+    Returns:
+        Часть {name} (например, "ustav"). Если формат не совпадает,
+        возвращает имя файла без расширения.
+    """
+    base_without_ext = os.path.splitext(filename)[0]
+    parts = base_without_ext.split('_')
+    if len(parts) < 3:
+        return base_without_ext
+    # Первые 2 части: default_name и user_id, остальное — искомое {name}
+    return '_'.join(parts[2:])
 
 
 def check_vector_db(persist_dir: str, embeddings):
@@ -230,6 +250,11 @@ async def save_to_vector_db(
 
     try:
         documents = loader.load()
+        # Добавляем имя файла и file_id в метаданные каждого документа
+        filename = _extract_name_from_filename(os.path.basename(file_path))
+        for doc in documents:
+            doc.metadata["filename"] = filename
+            doc.metadata["file_id"] = file_id
     except Exception as e:
         logger.error(f"Не удалось извлечь текст из {file_path}: {e}")
         return f"Не удалось извлечь текст из {file_path}: {e}"
@@ -286,3 +311,59 @@ async def save_to_vector_db(
         f"Файл добавлен в базу. "
         f"Символов: {total_chars}, фрагментов: {len(chunks)}"
     )
+
+
+def get_all_filenames_from_vector_db(
+        persist_dir: str = GUEST_RAG_DIR,
+        model_name: str = "Embeddings",
+        search_text: str | None = None
+) -> str:
+    """
+    Возвращает список уникальных имён файлов из векторной базы.
+    Если передан search_text, ищет первое совпадение по именам файлов
+    и возвращает имя найденного файла.
+    """
+    embeddings = get_giga_embeddings(model_name)
+    vector_db = check_vector_db(persist_dir, embeddings)
+    result = vector_db.get(include=["metadatas"])
+    filenames = set()
+    for metadata in result.get("metadatas", []):
+        filename = metadata.get("filename")
+        if not filename:
+            # Для старых документов извлекаем из source
+            source = metadata.get("source", "")
+            filename = os.path.basename(source) if source else None
+        if filename:
+            filenames.add(filename)
+    sorted_names = sorted(filenames)
+    if not sorted_names:
+        return "База знаний пуста. Загрузите документы через /addoc.\n"
+
+    # Поиск по имени файла, если передан search_text
+    if search_text:
+        search_lower = search_text.lower()
+        for name in sorted_names:
+            if search_lower in name.lower():
+                return name
+        return "Документ с таким названием не найден."
+
+    # Возврат полного списка
+    lines = [f"{i+1}. {name}" for i, name in enumerate(sorted_names)]
+    return "\n".join(lines) + "\n"
+
+
+def delete_file_from_vector_db(
+        file_name: str,
+        persist_dir: str = GUEST_RAG_DIR,
+        model_name: str = "Embeddings"
+) -> str:
+    """
+    Удаляет документ из векторной базы по точному имени файла.
+    """
+    embeddings = get_giga_embeddings(model_name)
+    vector_db = check_vector_db(persist_dir, embeddings)
+    try:
+        vector_db.delete(where={"filename": file_name})
+        return f"Файл '{file_name}' успешно удален из базы."
+    except Exception as e:
+        return f"Ошибка при удалении файла '{file_name}': {e}"

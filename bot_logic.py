@@ -1,17 +1,48 @@
 """Модуль бизнес-логики бота: обработка команд и сообщений."""
+import asyncio
 
 from fastapi import Request
 
 import db
 from global_state import (
     user_modes,
+    user_pending_delete,
 )
 from utils import logger
 from load_from_file import (
     save_to_vector_db,
+    get_all_filenames_from_vector_db,
+    delete_file_from_vector_db,
 )
 
 from rag_chain import ask_rag  # ← единственный импорт для RAG
+
+mode_map = {
+    "/gigachat": (
+        "gigachat",
+        "Режим: чат с ИИ по документам колледжа"
+    ),
+    "/gigachatpro": (
+        "gigachatpro",
+        "Режим: GigaChat Pro"
+    ),
+    "/file": (
+        "file",
+        "Режим: анализ файлов"
+    ),
+    "/edit": (
+        "edit",
+        "Режим: редактирование"
+    ),
+    "/aiagent": (
+        "aiagent",
+        "Режим: AI агент"
+        "Загрузка документов в базу знаний - загрузите документ pdf" "\n"
+        "Просмотр наименований документов в базе - наберите ls" "\n"
+        "Удаление документа из базы знаний:" "\n"
+        " для удаления документа отправьте его название" 
+    ),
+}
 
 
 async def handle_command(user_text: str, sender: dict) -> str | None:
@@ -37,29 +68,6 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
             balance = user_data["coins"] + user_data["giftcoins"]
             return f"Уважаемый: {user_name}!\n" f"Ваш баланс: {balance} ₽"
         return f"Пользователь: {user_name} в списках не значится)"
-
-    mode_map = {
-        "/gigachat": (
-            "gigachat",
-            "Режим: чат с ИИ по документам колледжа"
-        ),
-        "/gigachatpro": (
-            "gigachatpro",
-            "Режим: GigaChat Pro"
-        ),
-        "/file": (
-            "file",
-            "Режим: анализ файлов"
-        ),
-        "/edit": (
-            "edit",
-            "Режим: редактирование"
-        ),
-        "/guestrag": (
-            "guestrag",
-            "Режим: загрузка документов в базу знаний"
-        ),
-    }
 
     if command in mode_map:
         mode, reply = mode_map[command]
@@ -94,11 +102,41 @@ async def handle_message(
             return "Режим работы с файлами ещё не реализован."
         case "edit":
             return "Режим редактирования ещё не реализован."
-        case "guestrag":
-            return (
-                "Вы в режиме загрузки документов. "
-                "Отправьте PDF-файл для добавления в базу знаний."
-            )
+        case "aiagent":
+            user_text = user_text.strip()
+            user_id = sender.get("user_id")
+
+            # Проверка состояния подтверждения удаления
+            if user_id in user_pending_delete:
+                confirmations = {
+                    "1", "да", "yes", "ok"
+                }
+                if user_text.lower() in confirmations:
+                    file_to_del = user_pending_delete.pop(user_id)
+                    return await asyncio.to_thread(
+                        delete_file_from_vector_db, file_to_del
+                    )
+                else:
+                    user_pending_delete.pop(user_id, None)
+                    return "Удаление отменено."
+
+            if user_text.lower() == "ls":
+                # выводим список документов в базе, если пользователь набрал ls
+                docs_list = get_all_filenames_from_vector_db()
+                return docs_list
+
+            # поиск файла по имени для возможного удаления
+            result = get_all_filenames_from_vector_db(search_text=user_text)
+            if result and not result.startswith("Файл с таким"):
+                # Файл найден, запрашиваем подтверждение
+                user_pending_delete[user_id] = result
+                return (
+                    f"Найден файл: {result}\n"
+                    "Удалить? (Введите 1 / да / yes / ok)" "\n"
+                    "Для отмены введите 0 / нет / no / или любой символ) "
+                )
+            return result
+
         case None:
             return "Используйте /gigachat для начала общения с ИИ."
 
@@ -114,7 +152,7 @@ async def handle_image(
 
 async def handle_file(file_name: str, sender: dict) -> str | None:
     """Обработка файлов."""
-    if user_modes.get(sender["user_id"]) == "guestrag":
+    if user_modes.get(sender["user_id"]) == "aiagent":
         return await save_to_vector_db(
             file_path=file_name, sender=sender, model_name="Embeddings"
         )

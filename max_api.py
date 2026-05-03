@@ -56,7 +56,7 @@ BUTTONS = [
     {"text": "Чат с ИИ", "command": "/gigachat"},
     {"text": "Анализ файлов", "command": "/file"},
     {"text": "Изображения", "command": "/edit"},
-    {"text": "ИИ Агент", "command": "/guestrag"},
+    {"text": "ИИ Агент", "command": "/aiagent"},
     {"text": "Настройки", "command": "/settings"},
     {"text": "Оплата", "command": "/billing"},
 ]

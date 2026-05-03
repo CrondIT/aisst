@@ -210,7 +210,7 @@ async def process_update(
                 return
             ext = filename.split('.')[-1].lower()
             name = os.path.splitext(filename)[0]
-            if ext not in ALLOWED_EXTENSIONS.get("guestrag"):
+            if ext not in ALLOWED_EXTENSIONS.get("aiagent"):
                 return
             file_path = await save_user_file(
                 attr_url, user_id, ext, "rag", name

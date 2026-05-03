@@ -8,6 +8,7 @@ user_modes = {}  # Хранит текущий режим для каждого 
 user_edit_data = {}  # Хранит данные для редактирования изображений
 user_file_data = {}  # Хранит данные для анализа файлов
 user_edit_pending = {}  # Хранит ожидание промпта для редактирования изображ.
+user_pending_delete = {}  # Хранит ожидание подтверждения удаления файла
 user_previous_modes = {}  # Хранит предыдущий режим для каждого пользователя
 edited_photo_id = {}  # Хранит ID отредактированного изображения
 # Хранит путь к последнему отредактированному
@@ -23,7 +24,7 @@ load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
 # разрешенные расширения для разных режимов
 # ext in ALLOWED_EXTENSIONS.get("guestrag") -> True или False
 ALLOWED_EXTENSIONS = {
-    "guestrag": {"pdf"},
+    "aiagent": {"pdf"},
     "file": {"pdf", "docx", "txt"},
 }
 
