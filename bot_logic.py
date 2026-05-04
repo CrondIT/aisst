@@ -87,17 +87,31 @@ async def handle_message(
     logger.info(
         f"handle_message: user_id={user_id}, mode={user_modes[user_id]}"
     )
-
-    match user_modes[user_id]:
+    user_mode = user_modes[user_id]
+    match user_mode:
         case "gigachat":
-            # app.state.giga_lc_client — LangChain GigaChat, совместим с LCEL
             lc_llm = request.app.state.giga_lc_client
-            return await ask_rag(user_text=user_text, lc_llm=lc_llm, top_k=3)
+            answer = await ask_rag(
+                user_text=user_text, lc_llm=lc_llm, top_k=3
+            )
+            db.add_billing(
+                userid=user_id,
+                usermode=user_mode,
+                userprompt=user_text,
+                inccoins=0,
+                deccoins=2,
+                giftcoins=0,
+                notes= "",
+            )
+            return answer
+            
         case "gigachatpro":
-            return await request.app.state.giga_client.generate(
+            answer = await request.app.state.giga_client.generate(
                 user_text,
                 model="GigaChat-Pro",
             )
+            db.add_billing(user_id, user_mode, user_text, 0, 5)
+            return answer
         case "file":
             return "Режим работы с файлами ещё не реализован."
         case "edit":
@@ -113,6 +127,7 @@ async def handle_message(
                 }
                 if user_text.lower() in confirmations:
                     file_to_del = user_pending_delete.pop(user_id)
+                    db.add_billing(user_id, user_mode, user_text, 0, 1)
                     return await asyncio.to_thread(
                         delete_file_from_vector_db, file_to_del
                     )
@@ -123,6 +138,7 @@ async def handle_message(
             if user_text.lower() == "ls":
                 # выводим список документов в базе, если пользователь набрал ls
                 docs_list = get_all_filenames_from_vector_db()
+                db.add_billing(user_id, user_mode, user_text, 0, 1)
                 return docs_list
 
             # поиск файла по имени для возможного удаления
@@ -130,6 +146,7 @@ async def handle_message(
             if result and not result.startswith("Файл с таким"):
                 # Файл найден, запрашиваем подтверждение
                 user_pending_delete[user_id] = result
+                db.add_billing(user_id, user_mode, user_text, 0, 1)
                 return (
                     f"Найден файл: {result}\n"
                     "Удалить? (Введите 1 / да / yes / ok)" "\n"
