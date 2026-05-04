@@ -34,9 +34,9 @@ mode_map = {
         "edit",
         "Режим: редактирование"
     ),
-    "/aiagent": (
+    "/rag": (
         "aiagent",
-        "Режим: AI агент"
+        "Режим настройки базы знаний (RAG)." "\n"
         "Загрузка документов в базу знаний - загрузите документ pdf" "\n"
         "Просмотр наименований документов в базе - наберите ls" "\n"
         "Удаление документа из базы знаний:" "\n"
@@ -74,7 +74,7 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
         user_modes[user_id] = mode
         return reply
 
-    return None
+    return "Вы ввели неправильную команду"
 
 
 async def handle_message(
@@ -94,15 +94,7 @@ async def handle_message(
             answer = await ask_rag(
                 user_text=user_text, lc_llm=lc_llm, top_k=3
             )
-            db.add_billing(
-                userid=user_id,
-                usermode=user_mode,
-                userprompt=user_text,
-                inccoins=0,
-                deccoins=2,
-                giftcoins=0,
-                notes= "",
-            )
+            db.add_billing(user_id, user_mode, user_text, 0, 2)
             return answer
             
         case "gigachatpro":
@@ -116,7 +108,7 @@ async def handle_message(
             return "Режим работы с файлами ещё не реализован."
         case "edit":
             return "Режим редактирования ещё не реализован."
-        case "aiagent":
+        case "rag":
             user_text = user_text.strip()
             user_id = sender.get("user_id")
 
@@ -169,9 +161,15 @@ async def handle_image(
 
 async def handle_file(file_name: str, sender: dict) -> str | None:
     """Обработка файлов."""
-    if user_modes.get(sender["user_id"]) == "aiagent":
-        return await save_to_vector_db(
+    user_id = sender.get("user_id")
+    user_mode = user_modes[user_id]
+    if user_mode == "rag":
+        result = await save_to_vector_db(
             file_path=file_name, sender=sender, model_name="Embeddings"
         )
+        db.add_billing(
+            user_id, user_mode, "save_to_vector_db", 0, 5, notes=result
+        )
+        return result
     return "Режим еще не работает"
 
