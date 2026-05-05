@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
         app.state.giga_lc_client = LangChainGigaChat(
             credentials=GIGACHAT_API_KEY,
             scope=GIGACHAT_SCOPE,
-            model="GigaChat-2-Pro",                  # можно вынести в .env
+            model="GigaChat",                  # можно вынести в .env
             ca_bundle_file=RUS_TRUSTED_ROOT_CA_PEM,  # путь к сертификату
         )
 
