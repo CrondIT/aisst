@@ -53,10 +53,10 @@ async def send_message(user_id: int, text: str) -> int | None:
 
 
 BUTTONS = [
-    {"text": "Чат с ИИ", "command": "/gigachat"},
+    {"text": "Чат с агентом", "command": "/gigachat"},
     {"text": "Анализ файлов", "command": "/file"},
     {"text": "Изображения", "command": "/edit"},
-    {"text": "ИИ Агент", "command": "/aiagent"},
+    {"text": "Настройки агента", "command": "/rag"},
     {"text": "Настройки", "command": "/settings"},
     {"text": "Оплата", "command": "/billing"},
 ]

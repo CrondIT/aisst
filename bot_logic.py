@@ -100,7 +100,7 @@ async def handle_message(
         case "gigachatpro":
             answer = await request.app.state.giga_client.generate(
                 user_text,
-                model="GigaChat-Pro",
+                model="GigaChat-Max",
             )
             await db.add_billing(user_id, user_mode, user_text, 0, 5)
             return answer

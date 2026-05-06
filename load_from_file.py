@@ -3,6 +3,7 @@ from langchain_community.document_loaders import (
     PyPDFLoader,
     Docx2txtLoader,
     TextLoader,
+    UnstructuredExcelLoader,
 )
 import os
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -101,6 +102,10 @@ async def get_loader_for_file(file_path: str):
         "doc": Docx2txtLoader,
         ".txt": TextLoader,
         "txt": TextLoader,
+        ".xlsx": lambda p: UnstructuredExcelLoader(p, mode="elements"),
+        "xlsx": lambda p: UnstructuredExcelLoader(p, mode="elements"),
+        ".xls": lambda p: UnstructuredExcelLoader(p, mode="elements"),
+        "xls": lambda p: UnstructuredExcelLoader(p, mode="elements"),
     }
     if ext not in loaders:
         logger.warning(f"Формат {ext} не поддерживается")
@@ -113,13 +118,17 @@ async def get_loader_for_file(file_path: str):
         error_msg = str(e).lower()
 
         if "encrypt" in error_msg or "password" in error_msg:
-            logger.error(f"PDF защищён паролем: {file_path}")
-        elif "pdf" in error_type.lower():
+            logger.error(f"Файл защищён паролем: {file_path}")
+        elif ext in [".pdf"]:
             logger.error(f"PDF повреждён или ошибка чтения: {file_path}")
-        elif "docx" in error_type.lower():
-            logger.error(f"DOCX повреждён: {file_path}")
+        elif ext in [".docx", ".doc"]:
+            logger.error(f"DOC/DOCX файл повреждён: {file_path}")
+        elif ext in [".xlsx", ".xls"]:
+            logger.error(f"Excel файл повреждён или недоступен: {file_path}")
         else:
-            logger.error(f"Ошибка загрузки {file_path}: {error_type}")
+            logger.error(
+                f"Ошибка загрузки {file_path}: {error_type} - {error_msg}"
+            )
         return None
 
 

@@ -171,7 +171,7 @@ async def process_update(
     attachments = body.get("attachments", [])
     for att in attachments:
         attr_url = att.get("payload", {}).get("url")
-        # Аудио
+        # 8.1 Аудио
         if att.get("type") == "audio":
             voice_url = attr_url
             if voice_url and not user_text:
@@ -203,17 +203,19 @@ async def process_update(
                     )
                 )
 
-        # Файлы
+        # 8.2 Файлы
         if att.get("type") == "file" and attr_url:
             filename = att.get("filename")
             if not filename:
                 return
             ext = filename.split('.')[-1].lower()
             name = os.path.splitext(filename)[0]
-            if ext not in ALLOWED_EXTENSIONS.get("aiagent"):
+            if not any(
+                ext in ext_set for ext_set in ALLOWED_EXTENSIONS.values()
+            ):
                 return
             file_path = await save_user_file(
-                attr_url, user_id, ext, "rag", name
+                attr_url, user_id, ext, "file", name
             )
             if not file_path:
                 logger.error(f"Не удалось загрузить файл: {filename}")
@@ -245,7 +247,7 @@ async def process_update(
         command_parts = user_text.split(maxsplit=1)
         command = command_parts[0].lower()
         if command == "/start" and permission != 1:
-            text = "Большой блок информационного текста"
+            text = "Я Ваш персональный ИИ помощник!"
             await max_api.send_inline_message(user_id, text)
             return
         else:

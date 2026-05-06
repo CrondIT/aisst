@@ -24,7 +24,7 @@ load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
 # разрешенные расширения для разных режимов
 # ext in ALLOWED_EXTENSIONS.get("guestrag") -> True или False
 ALLOWED_EXTENSIONS = {
-    "aiagent": {"pdf"},
+    "rag": {"pdf", "txt", "docx", "doc", "xlsx", "xls"},
     "file": {"pdf", "docx", "txt"},
 }
 

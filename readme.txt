@@ -149,3 +149,19 @@ if __name__ == "__main__":
     asyncio.run(process_queue())
 3. Запуск: Запускать file_worker.py отдельно от основного бота (в отдельном терминале или как systemd-сервис).
     
+
+
+GigaChat (owned_by=salutedevices)
+GigaChat-2 (owned_by=salutedevices)
+GigaChat-2-Max (owned_by=salutedevices)
+GigaChat-2-Pro (owned_by=salutedevices)
+GigaChat-Max (owned_by=salutedevices)
+GigaChat-Max-preview (owned_by=salutedevices)
+GigaChat-Plus (owned_by=salutedevices)
+GigaChat-Pro (owned_by=salutedevices)
+GigaChat-Pro-preview (owned_by=salutedevices)
+GigaChat-preview (owned_by=salutedevices)
+Embeddings (owned_by=salutedevices)
+Embeddings-2 (owned_by=salutedevices)
+EmbeddingsGigaR (owned_by=salutedevices)
+GigaEmbeddings-3B-2025-09 (owned_by=salutedevices)
