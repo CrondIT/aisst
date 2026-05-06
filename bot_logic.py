@@ -57,7 +57,7 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
     command = user_text.split(maxsplit=1)[0].lower()
 
     user_name = sender.get("name", "Неизвестный пользователь")
-    user_id = sender.get("user_id")
+    user_id = int(sender.get("user_id"))
     user_data = await db.get_user(user_id)
     # если пользователь гость то разрещен только один режим (для бота ССТ)
     if user_data["permission"] == 1:
@@ -68,10 +68,15 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
             balance = user_data["coins"] + user_data["giftcoins"]
             return f"Уважаемый: {user_name}!\n" f"Ваш баланс: {balance} ₽"
         return f"Пользователь: {user_name} в списках не значится)"
+    
+    if command == "/mode":
+        return user_modes.get(user_id)
 
     if command in mode_map:
         mode, reply = mode_map[command]
         user_modes[user_id] = mode
+        # Очищаем состояние подтверждения удаления
+        user_pending_delete.pop(user_id, None)
         return reply
 
     return "Вы ввели неправильную команду"
@@ -81,13 +86,13 @@ async def handle_message(
         request: Request, user_text: str, sender: dict
 ) -> str | None:
     """Обработка сообщений пользователя."""
-    user_id = sender.get("user_id")
-    if user_modes.get(user_id) is None:
+    user_id = int(sender.get("user_id"))
+    if user_id not in user_modes:
         user_modes[user_id] = "gigachat"
     logger.info(
         f"handle_message: user_id={user_id}, mode={user_modes[user_id]}"
     )
-    user_mode = user_modes[user_id]
+    user_mode = user_modes.get(user_id)
     match user_mode:
         case "gigachat":
             lc_llm = request.app.state.giga_lc_client
@@ -110,7 +115,7 @@ async def handle_message(
             return "Режим редактирования ещё не реализован."
         case "rag":
             user_text = user_text.strip()
-            user_id = sender.get("user_id")
+            user_id = int(sender.get("user_id"))
 
             # Проверка состояния подтверждения удаления
             if user_id in user_pending_delete:
@@ -154,14 +159,15 @@ async def handle_image(
         request: Request, image_path: str, sender: dict
 ) -> str | None:
     """Обработка изображений."""
-    if user_modes.get(sender["user_id"]) == "edit":
+    user_id = int(sender.get("user_id"))
+    if user_modes.get(user_id) == "edit":
         return "Режим редактирования ещё не реализован."
     return "Режим еще не работает"
 
 
 async def handle_file(file_name: str, sender: dict) -> str | None:
     """Обработка файлов."""
-    user_id = sender.get("user_id")
+    user_id = int(sender.get("user_id"))
     user_mode = user_modes[user_id]
     if user_mode == "rag":
         result = await save_to_vector_db(

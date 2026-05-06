@@ -114,7 +114,7 @@ async def process_update(
     if update_type == "message_callback":
         callback_obj = update.get("callback", {})
         sender = callback_obj.get("user", {})
-        user_id = sender.get("user_id")
+        user_id = int(sender.get("user_id"))
         callback_data = callback_obj.get("payload", "")
         logger.info(f"Callback от {sender.get('name')}: {callback_data}")
         if callback_data and user_id:
@@ -144,7 +144,7 @@ async def process_update(
     # 4. Извлечение данных сообщения
     sender = message.get("sender", {})
     body = message.get("body", {})
-    user_id = sender.get("user_id")
+    user_id = int(sender.get("user_id"))
     user_text = body.get("text", "")
 
     # 5. Фильтр ботов
