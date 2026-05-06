@@ -94,7 +94,7 @@ async def handle_message(
             answer = await ask_rag(
                 user_text=user_text, lc_llm=lc_llm, top_k=3
             )
-            db.add_billing(user_id, user_mode, user_text, 0, 2)
+            await db.add_billing(user_id, user_mode, user_text, 0, 2)
             return answer
             
         case "gigachatpro":
@@ -102,7 +102,7 @@ async def handle_message(
                 user_text,
                 model="GigaChat-Pro",
             )
-            db.add_billing(user_id, user_mode, user_text, 0, 5)
+            await db.add_billing(user_id, user_mode, user_text, 0, 5)
             return answer
         case "file":
             return "Режим работы с файлами ещё не реализован."
@@ -119,7 +119,7 @@ async def handle_message(
                 }
                 if user_text.lower() in confirmations:
                     file_to_del = user_pending_delete.pop(user_id)
-                    db.add_billing(user_id, user_mode, user_text, 0, 1)
+                    await db.add_billing(user_id, user_mode, user_text, 0, 1)
                     return await asyncio.to_thread(
                         delete_file_from_vector_db, file_to_del
                     )
@@ -130,7 +130,7 @@ async def handle_message(
             if user_text.lower() == "ls":
                 # выводим список документов в базе, если пользователь набрал ls
                 docs_list = get_all_filenames_from_vector_db()
-                db.add_billing(user_id, user_mode, user_text, 0, 1)
+                await db.add_billing(user_id, user_mode, user_text, 0, 1)
                 return docs_list
 
             # поиск файла по имени для возможного удаления
@@ -138,7 +138,7 @@ async def handle_message(
             if result and not result.startswith("Файл с таким"):
                 # Файл найден, запрашиваем подтверждение
                 user_pending_delete[user_id] = result
-                db.add_billing(user_id, user_mode, user_text, 0, 1)
+                await db.add_billing(user_id, user_mode, user_text, 0, 1)
                 return (
                     f"Найден файл: {result}\n"
                     "Удалить? (Введите 1 / да / yes / ok)" "\n"
@@ -167,7 +167,7 @@ async def handle_file(file_name: str, sender: dict) -> str | None:
         result = await save_to_vector_db(
             file_path=file_name, sender=sender, model_name="Embeddings"
         )
-        db.add_billing(
+        await db.add_billing(
             user_id, user_mode, "save_to_vector_db", 0, 5, notes=result
         )
         return result
