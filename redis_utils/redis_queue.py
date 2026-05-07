@@ -1,6 +1,7 @@
 """
-Модуль для работы с очередями задач в Redis.
-Обеспечивает надёжное хранение и передачу задач между ботом и воркерами.
+Модуль для работы с очередями задач и состояниями пользователей в Redis.
+Используется для хранения состояний между Gunicorn воркерами
+и организации очередей задач (RAG, аудио, обработка файлов).
 """
 
 import redis
@@ -17,6 +18,7 @@ from redis_config import (
     REDIS_MAX_RETRIES,
     REDIS_SOCKET_TIMEOUT,
     REDIS_SOCKET_CONNECT_TIMEOUT,
+    REDIS_NOTIFICATION_CHANNEL,
 )
 
 logger = logging.getLogger(__name__)
@@ -603,6 +605,53 @@ class RedisQueue:
         if self.redis:
             self.redis.close()
             logger.info("🔌 Подключение к Redis закрыто")
+
+    # ==================== Pub/Sub уведомления ====================
+
+    def publish_notification(self, channel: str, data: Dict[str, Any]):
+        """
+        Публикует уведомление в канал Pub/Sub.
+        
+        Args:
+            channel: Имя канала (например, 'notifications')
+            data: Данные уведомления (сериализуемые в JSON)
+        """
+        try:
+            full_channel = self._make_key(channel)
+            message = json.dumps(data, ensure_ascii=False)
+            self.redis.publish(full_channel, message)
+            logger.debug(f"📢 Уведомление отправлено в канал {full_channel}")
+        except Exception as e:
+            logger.error(f"Ошибка публикации уведомления: {e}")
+
+    def publish_task_complete(self, task_id: str, user_id: int):
+        """
+        Публикует уведомление о завершении задачи.
+        
+        Args:
+            task_id: Идентификатор задачи
+            user_id: ID пользователя
+        """
+        self.publish_notification(
+            REDIS_NOTIFICATION_CHANNEL,
+            {"task_id": task_id, "user_id": user_id}
+        )
+
+    def subscribe_to_notifications(self, callback=None):
+        """
+        Подписывается на канал уведомлений.
+        
+        Args:
+            callback: Функция обратного вызова для обработки сообщений
+            
+        Returns:
+            Объект PubSub (нужно вызвать .run_in_thread() или использовать в цикле)
+        """
+        pubsub = self.redis.pubsub()
+        pubsub.subscribe(self._make_key(REDIS_NOTIFICATION_CHANNEL))
+        if callback:
+            pubsub.subscribe(**{self._make_key(REDIS_NOTIFICATION_CHANNEL): callback})
+        return pubsub
 
 
 # ==================== Глобальный экземпляр ====================

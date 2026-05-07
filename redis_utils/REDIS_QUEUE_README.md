@@ -339,3 +339,41 @@ REDIS_TTL_USER_CONTEXT=7200  # 2 часа вместо 1
 2. Включите SSL для подключения к Redis
 3. Ограничьте доступ к Redis по IP
 4. Не храните чувствительные данные в очередях
+
+-------------------
+已经完成了 Вариант 1 的修改。现在 ваш проект может корректно работать с 4 Gunicorn воркерами, когда включен Redis.
+Выполненные изменения
+1. redis_utils/redis_config.py
+- Обновил комментарии на русский
+- Изменил префикс Redis на aisst
+- Настроил очереди под задачи проекта: rag, audio, file_process
+- Добавил конфигурацию для канала Pub/Sub уведомлений
+2. redis_utils/redis_queue.py
+- Добавил методы для Pub/Sub уведомлений: publish_notification(), publish_task_complete(), subscribe_to_notifications()
+- Обновил комментарии
+3. global_state.py
+- Ключевое изменение: при USE_REDIS=true состояния хранятся только в Redis, in-memory словари не используются
+- Обновил функции get_user_context/set_user_context, get_user_mode/set_user_mode и другие для корректной работы с Redis
+- Добавил функции для работы с user_pending_delete: get_user_pending_delete(), set_user_pending_delete(), clear_user_pending_delete()
+4. bot_logic.py
+- Убрал прямые обращения к in-memory словарям (user_modes[user_id] и т.д.)
+- Переписал код для использования функций из global_state.py: get_user_mode(), set_user_mode(), get_user_pending_delete() и др.
+- Исправил импорты
+Как активировать Redis
+1. Убедитесь, что Redis сервер запущен и доступен
+2. В файле .env установите:
+USE_REDIS=true
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=  # если есть
+REDIS_PREFIX=aisst
+3. Перезапустите Gunicorn:
+# Остановите текущий процесс и запустите снова
+gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app --bind unix:/tmp/fastapi.sock --umask 000
+Что это дает
+Теперь при 4 воркерах Gunicorn:
+- Все воркеры видят одни и те же состояния пользователей (режимы, контексты) через Redis
+- Режим пользователя, установленный на воркере №1, будет виден на воркере №2 и т.д.
+- Данные хранятся с TTL (время жизни), указанным в redis_config.py
+Если Redis недоступен
+Если Redis не настроен или недоступен, код автоматически переключается на in-memory хранение (как было раньше), но это не решит проблему с 4 воркерами. Поэтому рекомендуется настроить Redis.

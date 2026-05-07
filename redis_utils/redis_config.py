@@ -1,5 +1,6 @@
 """
-Конфигурация Redis для очереди сообщений.
+Конфигурация Redis для проекта ассистента колледжа.
+Используется для хранения состояний пользователей и очередей задач.
 """
 
 import os
@@ -18,7 +19,7 @@ REDIS_CONFIG = {
 }
 
 # Префикс для всех ключей Redis
-REDIS_PREFIX = os.getenv("REDIS_PREFIX", "bot")
+REDIS_PREFIX = os.getenv("REDIS_PREFIX", "aisst")
 
 # Таймауты
 REDIS_SOCKET_TIMEOUT = int(os.getenv("REDIS_SOCKET_TIMEOUT", 5))
@@ -42,14 +43,13 @@ REDIS_TTL = {
     "rate_limit": int(os.getenv("REDIS_TTL_RATE_LIMIT", 60)),  # 1 минута
 }
 
-# Настройки очередей
+# Настройки очередей для проекта ассистента колледжа
 QUEUE_CONFIG = {
-    "chat": os.getenv("QUEUE_CHAT", "chat"),
-    "file": os.getenv("QUEUE_FILE", "file"),
-    "image_gen": os.getenv("QUEUE_IMAGE_GEN", "image:gen"),
-    "image_edit": os.getenv("QUEUE_IMAGE_EDIT", "image:edit"),
-    "high_priority": os.getenv("QUEUE_HIGH_PRIORITY", "high"),
-    "low_priority": os.getenv("QUEUE_LOW_PRIORITY", "low"),
+    "rag": os.getenv("QUEUE_RAG", "rag"),  # Задачи RAG (поиск по базе знаний)
+    "audio": os.getenv("QUEUE_AUDIO", "audio"),  # Транскрибация аудио
+    "file_process": os.getenv("QUEUE_FILE_PROCESS", "file_process"),  # Обработка файлов
+    "high_priority": os.getenv("QUEUE_HIGH_PRIORITY", "high"),  # Высокий приоритет
+    "low_priority": os.getenv("QUEUE_LOW_PRIORITY", "low"),  # Низкий приоритет
 }
 
 # Максимальное количество задач в очереди (для мониторинга)
@@ -58,5 +58,8 @@ MAX_QUEUE_SIZE = int(os.getenv("MAX_QUEUE_SIZE", 1000))
 # Интервал опроса очередей (в секундах)
 WORKER_POLL_INTERVAL = float(os.getenv("WORKER_POLL_INTERVAL", 1.0))
 
-# Количество воркеров
+# Количество воркеров (для справки, не используется напрямую)
 NUM_WORKERS = int(os.getenv("NUM_WORKERS", 4))
+
+# Канал для Pub/Sub уведомлений о завершении задач
+REDIS_NOTIFICATION_CHANNEL = os.getenv("REDIS_NOTIFICATION_CHANNEL", "notifications")

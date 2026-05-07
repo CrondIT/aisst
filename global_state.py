@@ -1,21 +1,32 @@
 import os
 from dotenv import load_dotenv
 from pathlib import Path
+from typing import Optional, Dict, Any, List
 
 # Global variables that need to be accessible across the entire project
-user_contexts = {}  # Хранилище контекста для каждого пользователя и режима
-user_modes = {}  # Хранит текущий режим для каждого пользователя
-user_edit_data = {}  # Хранит данные для редактирования изображений
-user_file_data = {}  # Хранит данные для анализа файлов
-user_edit_pending = {}  # Хранит ожидание промпта для редактирования изображ.
-user_pending_delete = {}  # Хранит ожидание подтверждения удаления файла
-user_previous_modes = {}  # Хранит предыдущий режим для каждого пользователя
-edited_photo_id = {}  # Хранит ID отредактированного изображения
-# Хранит путь к последнему отредактированному
-# изображению для каждого пользователя
-user_last_edited_images = {}
-# Хранит очередь изображений для редактирования для каждого пользователя
-user_edit_images_queue = {}
+# ВНИМАНИЕ: С переходом на Redis (USE_REDIS=true) эти словари не используются,
+# так как состояния хранятся в Redis для согласованности между Gunicorn воркерами
+# Оставлены для обратной совместимости, но не рекомендуются к использованию
+if os.getenv("USE_REDIS", "false").lower() != "true":
+    user_contexts = {}  # Хранилище контекста для каждого пользователя и режима
+    user_modes = {}  # Хранит текущий режим для каждого пользователя
+    user_edit_data = {}  # Хранит данные для редактирования изображений
+    user_file_data = {}  # Хранит данные для анализа файлов
+    user_edit_pending = {}  # Хранит ожидание промпта для редактирования изображ.
+    user_pending_delete = {}  # Хранит ожидание подтверждения удаления файла
+    user_previous_modes = {}  # Хранит предыдущий режим для каждого пользователя
+    edited_photo_id = {}  # Хранит ID отредактированного изображения
+    # Хранит путь к последнему отредактированному
+    # изображению для каждого пользователя
+    user_last_edited_images = {}
+    # Хранит очередь изображений для редактирования для каждого пользователя
+    user_edit_images_queue = {}
+else:
+    # Заглушки, чтобы код не падал при импорте
+    user_contexts = user_modes = user_edit_data = user_file_data = {}
+    user_edit_pending = user_pending_delete = user_previous_modes = {}
+    edited_photo_id = user_last_edited_images = user_edit_images_queue = {}
+
 MAX_CONTEXT_MESSAGES = 5
 MAX_REF_IMAGES = 6  # Максимальное количество изображений для редактирования
 
@@ -282,7 +293,9 @@ DOCUMENT_JSON_SCHEMA = """
 
 
 # ==================== Redis Integration ====================
-# Функции-обёртки для работы с Redis (если включён)
+# Функции для работы с Redis (если включён)
+# При USE_REDIS=true состояния хранятся ТОЛЬКО в Redis,
+# чтобы все Gunicorn воркеры видели одни и те же данные
 
 _use_redis = os.getenv("USE_REDIS", "false").lower() == "true"
 _queue = None
@@ -305,7 +318,8 @@ def _get_queue():
 def get_user_context(user_id: int, mode: str) -> list:
     """
     Получает контекст пользователя для указанного режима.
-    Сначала пробует из Redis, затем из памяти.
+    При USE_REDIS=true - только из Redis.
+    При USE_REDIS=false - из памяти (in-memory словарь).
     """
     if _use_redis:
         q = _get_queue()
@@ -313,10 +327,11 @@ def get_user_context(user_id: int, mode: str) -> list:
             context = q.get_user_state(user_id, f"context_{mode}")
             if context is not None:
                 return context
-
-    # Fallback к памяти
-    if user_id in user_contexts and mode in user_contexts[user_id]:
-        return user_contexts[user_id][mode]
+        # Если Redis недоступен, возвращаем дефолтный контекст
+    else:
+        # Fallback к памяти (только для одиночного процесса)
+        if user_id in user_contexts and mode in user_contexts[user_id]:
+            return user_contexts[user_id][mode]
 
     # Возвращаем дефолтный контекст
     system_message = SYSTEM_PROMPTS.get(mode, "You are a helpful assistant.")
@@ -326,18 +341,19 @@ def get_user_context(user_id: int, mode: str) -> list:
 def set_user_context(user_id: int, mode: str, context: list):
     """
     Сохраняет контекст пользователя для указанного режима.
-    Сохраняет и в Redis (если включён), и в память.
+    При USE_REDIS=true - только в Redis.
+    При USE_REDIS=false - в память (in-memory словарь).
     """
-    # Сохраняем в память
-    if user_id not in user_contexts:
-        user_contexts[user_id] = {}
-    user_contexts[user_id][mode] = context
-
-    # Сохраняем в Redis
     if _use_redis:
+        # Сохраняем только в Redis
         q = _get_queue()
         if q:
             q.set_user_state(user_id, f"context_{mode}", context)
+    else:
+        # Сохраняем в память (только для одиночного процесса)
+        if user_id not in user_contexts:
+            user_contexts[user_id] = {}
+        user_contexts[user_id][mode] = context
 
 
 def get_user_mode(user_id: int) -> str:
@@ -348,17 +364,20 @@ def get_user_mode(user_id: int) -> str:
             mode = q.get_user_state(user_id, "mode")
             if mode:
                 return mode
-    return user_modes.get(user_id, "chat")
+    else:
+        return user_modes.get(user_id, "chat")
+    # Дефолтное значение, если Redis недоступен
+    return "gigachat"
 
 
 def set_user_mode(user_id: int, mode: str):
     """Устанавливает текущий режим пользователя"""
-    user_modes[user_id] = mode
-
     if _use_redis:
         q = _get_queue()
         if q:
             q.set_user_state(user_id, "mode", mode)
+    else:
+        user_modes[user_id] = mode
 
 
 def get_user_file_data(user_id: int) -> dict:
@@ -369,17 +388,19 @@ def get_user_file_data(user_id: int) -> dict:
             data = q.get_user_state(user_id, "files")
             if data:
                 return data
-    return user_file_data.get(user_id, {})
+    else:
+        return user_file_data.get(user_id, {})
+    return {}
 
 
 def set_user_file_data(user_id: int, data: dict):
     """Сохраняет данные о файлах пользователя"""
-    user_file_data[user_id] = data
-
     if _use_redis:
         q = _get_queue()
         if q:
             q.set_user_state(user_id, "files", data)
+    else:
+        user_file_data[user_id] = data
 
 
 def get_user_edit_data(user_id: int) -> dict:
@@ -390,17 +411,19 @@ def get_user_edit_data(user_id: int) -> dict:
             data = q.get_user_state(user_id, "edit")
             if data:
                 return data
-    return user_edit_data.get(user_id, {})
+    else:
+        return user_edit_data.get(user_id, {})
+    return {}
 
 
 def set_user_edit_data(user_id: int, data: dict):
     """Сохраняет данные для редактирования изображений"""
-    user_edit_data[user_id] = data
-
     if _use_redis:
         q = _get_queue()
         if q:
             q.set_user_state(user_id, "edit", data)
+    else:
+        user_edit_data[user_id] = data
 
 
 def get_user_edit_queue(user_id: int) -> list:
@@ -411,39 +434,76 @@ def get_user_edit_queue(user_id: int) -> list:
             queue = q.get_user_state(user_id, "edit_queue")
             if queue:
                 return queue
-    return user_edit_images_queue.get(user_id, [])
+    else:
+        return user_edit_images_queue.get(user_id, [])
+    return []
 
 
 def set_user_edit_queue(user_id: int, queue: list):
     """Сохраняет очередь изображений для редактирования"""
-    user_edit_images_queue[user_id] = queue
-
     if _use_redis:
         q = _get_queue()
         if q:
             q.set_user_state(user_id, "edit_queue", queue)
+    else:
+        user_edit_images_queue[user_id] = queue
 
 
 def clear_user_data(user_id: int):
     """Очищает все данные пользователя"""
-    # Очищаем память
-    for storage in [
-        user_contexts,
-        user_file_data,
-        user_edit_data,
-        user_edit_images_queue,
-        user_edit_pending,
-        edited_photo_id,
-        user_last_edited_images,
-    ]:
-        if user_id in storage:
-            del storage[user_id]
-
-    # Очищаем Redis
     if _use_redis:
         q = _get_queue()
         if q:
             q.delete_user_state(user_id)
+    else:
+        # Очищаем память
+        for storage in [
+            user_contexts,
+            user_file_data,
+            user_edit_data,
+            user_edit_images_queue,
+            user_edit_pending,
+            edited_photo_id,
+            user_last_edited_images,
+            user_modes,  # Добавлено
+            user_previous_modes,  # Добавлено
+        ]:
+            if user_id in storage:
+                del storage[user_id]
+
+
+# ==================== User Pending Delete ====================
+
+def get_user_pending_delete(user_id: int) -> str | None:
+    """Получает состояние подтверждения удаления файла для пользователя"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            data = q.get_user_state(user_id, "pending_delete")
+            return data
+    else:
+        return user_edit_pending.get(user_id)
+    return None
+
+
+def set_user_pending_delete(user_id: int, filename: str):
+    """Устанавливает состояние подтверждения удаления файла"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.set_user_state(user_id, "pending_delete", filename)
+    else:
+        user_edit_pending[user_id] = filename
+
+
+def clear_user_pending_delete(user_id: int):
+    """Очищает состояние подтверждения удаления файла"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.delete_user_state(user_id, "pending_delete")
+    else:
+        user_edit_pending.pop(user_id, None)
 
 
 def check_rate_limit(

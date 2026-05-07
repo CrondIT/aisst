@@ -5,8 +5,11 @@ from fastapi import Request
 
 import db
 from global_state import (
-    user_modes,
-    user_pending_delete,
+    get_user_mode,
+    set_user_mode,
+    get_user_pending_delete,
+    set_user_pending_delete,
+    clear_user_pending_delete,
 )
 from utils import logger
 from load_from_file import (
@@ -47,7 +50,7 @@ mode_map = {
 
 async def handle_command(user_text: str, sender: dict) -> str | None:
     """
-    Обработка команд бота только устанавливает user_modes[user_id]
+    Обработка команд бота - устанавливает режим пользователя
     и возвращает текст ответа для информирования пользователя 
     или None, если команда не распознана.
     """
@@ -70,15 +73,15 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
         return f"Пользователь: {user_name} в списках не значится)"
     
     if command == "/mode":
-        return user_modes.get(user_id)
-
+        return get_user_mode(user_id)
+    
     if command in mode_map:
         mode, reply = mode_map[command]
-        user_modes[user_id] = mode
+        set_user_mode(user_id, mode)
         # Очищаем состояние подтверждения удаления
-        user_pending_delete.pop(user_id, None)
+        clear_user_pending_delete(user_id)
         return reply
-
+    
     return "Вы ввели неправильную команду"
 
 
@@ -87,12 +90,16 @@ async def handle_message(
 ) -> str | None:
     """Обработка сообщений пользователя."""
     user_id = int(sender.get("user_id"))
-    if user_id not in user_modes:
-        user_modes[user_id] = "gigachat"
+    user_mode = get_user_mode(user_id)
+    # Если режим не установлен, по умолчанию gigachat
+    if not user_mode:
+        user_mode = "gigachat"
+        set_user_mode(user_id, user_mode)
+    
     logger.info(
-        f"handle_message: user_id={user_id}, mode={user_modes[user_id]}"
+        f"handle_message: user_id={user_id}, mode={user_mode}"
     )
-    user_mode = user_modes.get(user_id)
+    
     match user_mode:
         case "gigachat":
             lc_llm = request.app.state.giga_lc_client
@@ -118,31 +125,33 @@ async def handle_message(
             user_id = int(sender.get("user_id"))
 
             # Проверка состояния подтверждения удаления
-            if user_id in user_pending_delete:
+            pending = get_user_pending_delete(user_id)
+            if pending is not None:
                 confirmations = {
                     "1", "да", "yes", "ok"
                 }
                 if user_text.lower() in confirmations:
-                    file_to_del = user_pending_delete.pop(user_id)
+                    file_to_del = get_user_pending_delete(user_id)
+                    clear_user_pending_delete(user_id)
                     await db.add_billing(user_id, user_mode, user_text, 0, 1)
                     return await asyncio.to_thread(
                         delete_file_from_vector_db, file_to_del
                     )
                 else:
-                    user_pending_delete.pop(user_id, None)
+                    clear_user_pending_delete(user_id)
                     return "Удаление отменено."
-
+            
             if user_text.lower() == "ls":
                 # выводим список документов в базе, если пользователь набрал ls
                 docs_list = get_all_filenames_from_vector_db()
                 await db.add_billing(user_id, user_mode, user_text, 0, 1)
                 return docs_list
-
+            
             # поиск файла по имени для возможного удаления
             result = get_all_filenames_from_vector_db(search_text=user_text)
             if result and not result.startswith("Файл с таким"):
                 # Файл найден, запрашиваем подтверждение
-                user_pending_delete[user_id] = result
+                set_user_pending_delete(user_id, result)
                 await db.add_billing(user_id, user_mode, user_text, 0, 1)
                 return (
                     f"Найден файл: {result}\n"
@@ -150,7 +159,7 @@ async def handle_message(
                     "Для отмены введите 0 / нет / no / или любой символ) "
                 )
             return result
-
+        
         case None:
             return "Используйте /gigachat для начала общения с ИИ."
 
@@ -160,7 +169,7 @@ async def handle_image(
 ) -> str | None:
     """Обработка изображений."""
     user_id = int(sender.get("user_id"))
-    if user_modes.get(user_id) == "edit":
+    if get_user_mode(user_id) == "edit":
         return "Режим редактирования ещё не реализован."
     return "Режим еще не работает"
 
@@ -168,7 +177,7 @@ async def handle_image(
 async def handle_file(file_name: str, sender: dict) -> str | None:
     """Обработка файлов."""
     user_id = int(sender.get("user_id"))
-    user_mode = user_modes[user_id]
+    user_mode = get_user_mode(user_id)
     if user_mode == "rag":
         result = await save_to_vector_db(
             file_path=file_name, sender=sender, model_name="Embeddings"
