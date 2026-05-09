@@ -10,6 +10,8 @@ from global_state import (
     get_user_pending_delete,
     set_user_pending_delete,
     clear_user_pending_delete,
+    enqueue_task,
+    _use_redis,
 )
 from utils import logger
 from load_from_file import (
@@ -175,10 +177,28 @@ async def handle_image(
 
 
 async def handle_file(file_name: str, sender: dict) -> str | None:
-    """Обработка файлов."""
+    """Обработка файлов. Использует Redis очередь для больших файлов."""
     user_id = int(sender.get("user_id"))
     user_mode = get_user_mode(user_id)
     if user_mode == "rag":
+        if _use_redis:
+            try:
+                task_id = enqueue_task("rag", {
+                    "file_path": file_name,
+                    "user_id": user_id,
+                    "sender": sender,
+                })
+                logger.info(
+                    f"RAG задача {task_id[:8]}... добавлена в очередь "
+                    f"для пользователя {user_id}"
+                )
+                return (
+                    f"📥 Файл принят в обработку.\n"
+                    f"Это может занять несколько минут.\n"
+                    f"Вы получите уведомление по завершении."
+                )
+            except Exception as e:
+                logger.error(f"Не удалось добавить задачу в очередь: {e}")
         result = await save_to_vector_db(
             file_path=file_name, sender=sender, model_name="Embeddings"
         )

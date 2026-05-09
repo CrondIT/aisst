@@ -11,13 +11,26 @@ import sys
 import os
 from typing import Optional, Dict, Any
 
-from telegram import Bot
-from telegram.error import TelegramError
+# Для совместимости с Telegram (если используется)
+try:
+    from telegram import Bot
+    from telegram.error import TelegramError
+    TELEGRAM_AVAILABLE = True
+except ImportError:
+    TELEGRAM_AVAILABLE = False
 
 from .redis_queue import RedisQueue, RedisQueueError
 from .redis_config import REDIS_PREFIX
-import dbbot
-from message_utils import truncate_caption
+
+# Импортируем модули бота (могут отсутствовать в некоторых конфигурациях)
+try:
+    import dbbot
+    from message_utils import truncate_caption
+    BOT_MODULES_AVAILABLE = True
+except ImportError:
+    BOT_MODULES_AVAILABLE = False
+    dbbot = None
+    truncate_caption = None
 
 # Настройка логирования
 logging.basicConfig(
@@ -122,13 +135,16 @@ class RedisListener:
                         data = json.loads(task_info)
                         task_id = data.get("task_id")
                         user_id = data.get("user_id")
+                        task_type = data.get("task_type", "default")
 
                         if task_id and user_id:
                             logger.info(
                                 f"📬 Получено уведомление: "
-                                f"задача {task_id} для пользователя {user_id}"
+                                f"задача {task_id[:8]}..., тип={task_type}"
                             )
-                            await self._process_task_result(task_id, user_id)
+                            await self._process_notification(
+                                task_id, user_id, task_type, data
+                            )
                     except json.JSONDecodeError:
                         logger.error(
                             f"Ошибка парсинга уведомления: {task_info}"
@@ -146,6 +162,92 @@ class RedisListener:
             except Exception as e:
                 logger.exception(f"Неожиданная ошибка: {e}")
                 await asyncio.sleep(1)
+
+    async def _process_notification(
+        self, task_id: str, user_id: int, task_type: str, data: dict
+    ):
+        """
+        Обрабатывает уведомление в зависимости от типа задачи.
+
+        Args:
+            task_id: Идентификатор задачи
+            user_id: ID пользователя
+            task_type: Тип задачи (rag, audio, и т.д.)
+            data: Полные данные уведомления
+        """
+        if task_type == "rag":
+            await self._process_rag_result(task_id, user_id, data)
+        else:
+            # Для остальных задач используем старый метод
+            await self._process_task_result(task_id, user_id)
+
+    async def _process_rag_result(
+        self, task_id: str, user_id: int, data: dict
+    ):
+        """
+        Обрабатывает результат RAG задачи.
+
+        Args:
+            task_id: Идентификатор задачи
+            user_id: ID пользователя
+            data: Данные уведомления с результатом
+        """
+        status = data.get("status")
+        result = data.get("result")
+        error = data.get("error")
+
+        if status == "completed":
+            logger.info(
+                f"✅ RAG задача {task_id[:8]}... выполнена для user_id={user_id}"
+            )
+            message = f"✅ Обработка завершена!\n{result}"
+            await self._send_max_message(user_id, message)
+        elif status == "failed":
+            logger.error(
+                f"❌ RAG задача {task_id[:8]}... провалена: {error}"
+            )
+            message = f"❌ Ошибка при обработке файла:\n{error}"
+            await self._send_max_message(user_id, message)
+        else:
+            logger.warning(
+                f"⚠️ Неизвестный статус RAG задачи: {status}"
+            )
+
+    async def _send_max_message(self, user_id: int, text: str):
+        """
+        Отправляет сообщение пользователю через MAX API.
+        Использует httpx напрямую, без зависимости от max_api модуля.
+
+        Args:
+            user_id: ID пользователя
+            text: Текст сообщения
+        """
+        import httpx
+
+        from global_state import MAX_API_TOKEN, MAX_BASE_URL
+
+        url = f"{MAX_BASE_URL}/messages"
+        headers = {
+            "Authorization": MAX_API_TOKEN,
+            "Content-Type": "application/json"
+        }
+        params = {"user_id": user_id}
+        payload = {"text": text}
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    url, headers=headers, params=params, json=payload
+                )
+                if response.status_code == 200:
+                    logger.info(f"Сообщение отправлено user_id={user_id}")
+                else:
+                    logger.error(
+                        f"Ошибка отправки сообщения: "
+                        f"{response.status_code} — {response.text}"
+                    )
+        except Exception as e:
+            logger.error(f"Исключение при отправке сообщения: {e}")
 
     async def _process_task_result(self, task_id: str, user_id: int):
         """

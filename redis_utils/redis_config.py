@@ -39,27 +39,21 @@ REDIS_TTL = {
     "user_mode": int(os.getenv("REDIS_TTL_USER_MODE", 7200)),  # 2 часа
     "user_files": int(os.getenv("REDIS_TTL_USER_FILES", 1800)),  # 30 минут
     "user_edit": int(os.getenv("REDIS_TTL_USER_EDIT", 1800)),  # 30 минут
-    "task_result": int(os.getenv("REDIS_TTL_TASK_RESULT", 300)),  # 5 минут
+    "task_result": int(os.getenv("REDIS_TTL_TASK_RESULT", 1800)),  # 30 мин для RAG
     "rate_limit": int(os.getenv("REDIS_TTL_RATE_LIMIT", 60)),  # 1 минута
 }
 
 # Настройки очередей для проекта ассистента колледжа
 QUEUE_CONFIG = {
-    "rag": os.getenv("QUEUE_RAG", "rag"),  # Задачи RAG (поиск по базе знаний)
+    "rag": os.getenv("QUEUE_RAG", "rag"),  # Загрузка файлов в RAG
     "audio": os.getenv("QUEUE_AUDIO", "audio"),  # Транскрибация аудио
     "file_process": os.getenv("QUEUE_FILE_PROCESS", "file_process"),  # Обработка файлов
     "high_priority": os.getenv("QUEUE_HIGH_PRIORITY", "high"),  # Высокий приоритет
     "low_priority": os.getenv("QUEUE_LOW_PRIORITY", "low"),  # Низкий приоритет
 }
 
-# Максимальное количество задач в очереди (для мониторинга)
-MAX_QUEUE_SIZE = int(os.getenv("MAX_QUEUE_SIZE", 1000))
-
-# Интервал опроса очередей (в секундах)
-WORKER_POLL_INTERVAL = float(os.getenv("WORKER_POLL_INTERVAL", 1.0))
-
-# Количество воркеров (для справки, не используется напрямую)
-NUM_WORKERS = int(os.getenv("NUM_WORKERS", 4))
-
 # Канал для Pub/Sub уведомлений о завершении задач
 REDIS_NOTIFICATION_CHANNEL = os.getenv("REDIS_NOTIFICATION_CHANNEL", "notifications")
+
+# TTL для результатов задач по типу (в секундах)
+RAG_TASK_TIMEOUT = int(os.getenv("RAG_TASK_TIMEOUT", 3600))  # 1 час для RAG задач

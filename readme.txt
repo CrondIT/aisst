@@ -165,3 +165,42 @@ Embeddings (owned_by=salutedevices)
 Embeddings-2 (owned_by=salutedevices)
 EmbeddingsGigaR (owned_by=salutedevices)
 GigaEmbeddings-3B-2025-09 (owned_by=salutedevices)
+
+--------------------
+
+Резюме изменений
+1. redis_utils/redis_config.py
+- ✅ Увеличен TTL для задач: task_result = 1800с (30 мин)
+- ✅ Добавлена конфигурация RAG_TASK_TIMEOUT
+2. redis_utils/redis_queue.py
+- ✅ Добавлен метод publish_result() для публикации расширенных результатов задач
+3. bot_logic.py
+- ✅ handle_file() теперь использует enqueue_task() для RAG задач
+- ✅ При включенном Redis возвращает "📥 Файл принят в обработку..."
+- ✅ Fallback на синхронную обработку если Redis выключен
+4. rag_worker.py (новый файл)
+- ✅ Отдельный процесс для обработки RAG задач
+- ✅ Читает из Redis очереди rag
+- ✅ Публикует результаты через Pub/Sub
+- ✅ Логирование в файл rag_worker.log
+5. redis_utils/redis_listener.py
+- ✅ Добавлен обработчик _process_notification() для разных типов задач
+- ✅ Добавлен _process_rag_result() для RAG уведомлений
+- ✅ Добавлен _send_max_message() для отправки через MAX API
+- ✅ Обработка ошибок импорта (Telegram, bot modules)
+---
+
+
+Запуск на сервере
+# 1. Скопировать файлы (git pull)
+cd /root/aisst
+# 2. Запустить RAG Worker (отдельный процесс)
+python rag_worker.py &
+# или через supervisor/systemd
+# 3. Перезапустить gunicorn
+sudo systemctl restart aisst
+Проверка работы
+# В redis-cli
+redis-cli MONITOR
+# Проверить логи RAG Worker
+tail -f rag_worker.log

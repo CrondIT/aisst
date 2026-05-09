@@ -627,7 +627,7 @@ class RedisQueue:
     def publish_task_complete(self, task_id: str, user_id: int):
         """
         Публикует уведомление о завершении задачи.
-        
+
         Args:
             task_id: Идентификатор задачи
             user_id: ID пользователя
@@ -636,6 +636,29 @@ class RedisQueue:
             REDIS_NOTIFICATION_CHANNEL,
             {"task_id": task_id, "user_id": user_id}
         )
+
+    def publish_result(self, task_id: str, result: dict):
+        """
+        Публикует результат задачи с расширенной информацией.
+
+        Args:
+            task_id: Идентификатор задачи
+            result: Словарь с полями:
+                - status: 'completed' или 'failed'
+                - user_id: ID пользователя
+                - result: текст результата (при успехе)
+                - error: текст ошибки (при неудаче)
+        """
+        notification = {
+            "task_id": task_id,
+            "task_type": "rag",
+            "status": result.get("status"),
+            "user_id": result.get("user_id"),
+            "result": result.get("result"),
+            "error": result.get("error"),
+        }
+        self.publish_notification(REDIS_NOTIFICATION_CHANNEL, notification)
+        logger.info(f"📢 Результат задачи {task_id} опубликован")
 
     def subscribe_to_notifications(self, callback=None):
         """
