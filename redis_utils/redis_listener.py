@@ -1,36 +1,18 @@
 """
 Слушатель результатов от воркеров.
 Получает выполненные задачи из Redis
-и отправляет ответы пользователям в Telegram.
+и отправляет ответы пользователям в MAX.
 """
 
 import asyncio
 import logging
 import signal
 import sys
-import os
 from typing import Optional, Dict, Any
-
-# Для совместимости с Telegram (если используется)
-try:
-    from telegram import Bot
-    from telegram.error import TelegramError
-    TELEGRAM_AVAILABLE = True
-except ImportError:
-    TELEGRAM_AVAILABLE = False
 
 from .redis_queue import RedisQueue, RedisQueueError
 from .redis_config import REDIS_PREFIX
 
-# Импортируем модули бота (могут отсутствовать в некоторых конфигурациях)
-try:
-    import dbbot
-    from message_utils import truncate_caption
-    BOT_MODULES_AVAILABLE = True
-except ImportError:
-    BOT_MODULES_AVAILABLE = False
-    dbbot = None
-    truncate_caption = None
 
 # Настройка логирования
 logging.basicConfig(
@@ -51,15 +33,10 @@ class RedisListener:
     Мониторит статусы задач в Redis и отправляет ответы пользователям.
     """
 
-    def __init__(self, bot_token: str):
+    def __init__(self):
         """
         Инициализация слушателя.
-
-        Args:
-            bot_token: Токен Telegram бота
         """
-        self.bot_token = bot_token
-        self.bot: Optional[Bot] = None
         self.queue: Optional[RedisQueue] = None
         self.running = False
         self.tasks_processed = 0
@@ -86,11 +63,6 @@ class RedisListener:
         logger.info("Инициализация слушателя результатов...")
 
         try:
-            # Инициализация бота
-            self.bot = Bot(token=self.bot_token)
-            await self.bot.get_me()  # Проверяем токен
-            logger.info("✅ Telegram бот инициализирован")
-
             # Инициализация Redis
             self.queue = RedisQueue()
             logger.info("✅ Redis подключён")
@@ -267,7 +239,7 @@ class RedisListener:
                 result = result_data.get("result") if result_data else None
 
                 # Отправляем ответ пользователю
-                await self._send_response(user_id, result)
+                await self._send_max_message(user_id, result)
 
                 self.tasks_processed += 1
                 logger.info(
@@ -281,14 +253,16 @@ class RedisListener:
                 )
 
                 # Уведомляем пользователя об ошибке
-                await self._send_error(user_id, error or "Неизвестная ошибка")
+                await self._send_max_message(
+                    user_id, f"❌ Ошибка: {error or 'Неизвестная ошибка'}"
+                )
 
                 self.tasks_failed += 1
                 logger.error(f"❌ Задача {task_id} не выполнена: {error}")
 
             elif status == RedisQueue.STATUS_TIMEOUT:
-                await self._send_error(
-                    user_id, "Превышено время ожидания ответа"
+                await self._send_max_message(
+                    user_id, "❌ Превышено время ожидания ответа"
                 )
                 self.tasks_failed += 1
                 logger.warning(f"⏱️ Задача {task_id} превысила время ожидания")
@@ -298,116 +272,7 @@ class RedisListener:
                 f"Ошибка обработки результата задачи {task_id}: {e}"
             )
 
-    async def _send_response(self, user_id: int, result: Dict[str, Any]):
-        """
-        Отправляет ответ пользователю в Telegram.
-
-        Args:
-            user_id: ID пользователя
-            result: Результат выполнения задачи
-        """
-        if not result:
-            await self._send_error(user_id, "Пустой результат")
-            return
-
-        response_text = result.get("response")
-        image_url = result.get("image_url")
-        edited_image_path = result.get("edited_image_path")
-        processing_time = result.get("processing_time", 0)
-
-        try:
-            if image_url:
-                # Отправляем изображение
-                caption = truncate_caption(
-                    f"Готово за {processing_time:.1f}с",
-                    prefix="✅ "
-                )
-                await self.bot.send_photo(
-                    chat_id=user_id,
-                    photo=image_url,
-                    caption=caption,
-                )
-            elif edited_image_path and os.path.exists(edited_image_path):
-                # Отправляем отредактированное изображение
-                caption = truncate_caption(
-                    f"Готово за {processing_time:.1f}с",
-                    prefix="✅ "
-                )
-                with open(edited_image_path, "rb") as f:
-                    await self.bot.send_photo(
-                        chat_id=user_id,
-                        photo=f,
-                        caption=caption,
-                    )
-            elif response_text:
-                # Отправляем текст
-                from message_utils import send_long_message
-
-                # Создаём фейковый update для send_long_message
-                class FakeMessage:
-                    async def reply_text(self, text, parse_mode=None):
-                        await self.bot.send_message(
-                            chat_id=user_id, text=text, parse_mode=parse_mode
-                        )
-
-                class FakeUpdate:
-                    def __init__(self):
-                        self.message = FakeMessage()
-
-                await send_long_message(FakeUpdate(), response_text)
-            else:
-                # Неизвестный формат результата
-                await self.bot.send_message(
-                    chat_id=user_id,
-                    text=f"✅ Задача выполнена за {processing_time:.1f}с",
-                )
-
-        except TelegramError as e:
-            logger.error(f"Ошибка отправки ответа пользователю {user_id}: {e}")
-
-            # Логируем в базу данных
-            dbbot.log_action(
-                user_id,
-                "system",
-                f"Ошибка отправки ответа: {e}",
-                0,
-                0,
-                "error",
-                "redis_listener>_send_response",
-            )
-
-    async def _send_error(self, user_id: int, error_message: str):
-        """
-        Отправляет сообщение об ошибке пользователю.
-
-        Args:
-            user_id: ID пользователя
-            error_message: Текст ошибки
-        """
-        try:
-            # Сокращаем сообщение об ошибке
-            if len(error_message) > 500:
-                error_message = error_message[:500] + "..."
-
-            await self.bot.send_message(
-                chat_id=user_id,
-                text=f"❌ Ошибка при обработке запроса:\n{error_message}",
-            )
-
-            # Логируем в базу данных
-            dbbot.log_action(
-                user_id,
-                "system",
-                f"Ошибка обработки задачи: {error_message}",
-                0,
-                0,
-                "error",
-                "redis_listener>_send_error",
-            )
-
-        except TelegramError as e:
-            logger.error(f"Ошибка отправки ошибки пользователю {user_id}: {e}")
-
+    
     async def _check_completed_tasks(self, pending_tasks: dict):
         """
         Периодически проверяет завершённые задачи.
@@ -431,9 +296,6 @@ class RedisListener:
         if self.queue:
             self.queue.close()
 
-        if self.bot:
-            await self.bot.session.close()
-
         # Логируем статистику
         logger.info(
             f"📊 Статистика: обработано={self.tasks_processed}, "
@@ -443,37 +305,16 @@ class RedisListener:
         logger.info("👋 Слушатель остановлен")
 
 
-async def run_listener(bot_token: str):
+async def run_listener():
     """Точка входа для запуска слушателя"""
-    listener = RedisListener(bot_token)
+    listener = RedisListener()
     await listener.start()
 
 
 def main():
     """Основная функция для запуска из командной строки"""
-    import argparse
-    from dotenv import load_dotenv
-
-    load_dotenv()
-
-    parser = argparse.ArgumentParser(
-        description="Слушатель результатов от воркеров"
-    )
-    parser.add_argument(
-        "--token",
-        type=str,
-        default=os.getenv("TELEGRAM_TOKEN2"),
-        help="Токен Telegram бота",
-    )
-
-    args = parser.parse_args()
-
-    if not args.token:
-        logger.error("Не указан токен Telegram бота")
-        sys.exit(1)
-
     try:
-        asyncio.run(run_listener(args.token))
+        asyncio.run(run_listener())
     except KeyboardInterrupt:
         logger.info("Получен сигнал завершения")
 

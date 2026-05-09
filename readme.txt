@@ -196,6 +196,7 @@ GigaEmbeddings-3B-2025-09 (owned_by=salutedevices)
 cd /root/aisst
 # 2. Запустить RAG Worker (отдельный процесс)
 python rag_worker.py &
+python -m redis_utils.redis_listener &
 # или через supervisor/systemd
 # 3. Перезапустить gunicorn
 sudo systemctl restart aisst

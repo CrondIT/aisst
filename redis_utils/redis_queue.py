@@ -68,7 +68,6 @@ class RedisQueue:
             retry_config["retry"] = Retry(
                 ExponentialBackoff(), REDIS_MAX_RETRIES
             )
-            retry_config["retry_on_timeout"] = True
 
         try:
             # Пробуем подключение с указанной базой
@@ -109,7 +108,8 @@ class RedisQueue:
                 )
                 self.redis.ping()
                 logger.info(
-                    f"Подкл. к Redis: {self.config['host']}:{self.config['port']} (db=0 по умолчанию)"
+                    f"Подкл. к Redis: {self.config['host']}:"
+                    f"{self.config['port']} (db=0 по умолчанию)"
                 )
             else:
                 logger.error(f"❌ Ошибка подключения к Redis: {e}")
@@ -252,7 +252,21 @@ class RedisQueue:
 
             return None
 
+        except (TimeoutError, redis.TimeoutError):
+            # Таймаут BLPOP - нормальная ситуация при ожидании задач
+            return None
         except redis.RedisError as e:
+            # Timeout reading from socket - нормально при ожидании
+            err_lower = str(e).lower()
+            if "timeout" in err_lower or "timed out" in err_lower:
+                return None
+            logger.error(f"❌ Ошибка получения задачи из очереди: {e}")
+            return None
+        except OSError as e:
+            # Timeout reading from socket на уровне OS
+            err_lower = str(e).lower()
+            if "timeout" in err_lower or "timed out" in err_lower:
+                return None
             logger.error(f"❌ Ошибка получения задачи из очереди: {e}")
             return None
 
