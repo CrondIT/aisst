@@ -14,8 +14,8 @@ from typing import Optional, Dict, Any
 from telegram import Bot
 from telegram.error import TelegramError
 
-from redis_queue import RedisQueue, RedisQueueError
-from redis_config import REDIS_PREFIX
+from .redis_queue import RedisQueue, RedisQueueError
+from .redis_config import REDIS_PREFIX
 import dbbot
 from message_utils import truncate_caption
 

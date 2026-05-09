@@ -1,12 +1,11 @@
 """Обработка входящих обновлений и webhook от MAX."""
 
 import asyncio
-import time
-from collections import defaultdict
 from global_state import (
     TRUSTED_WEBHOOK_IPS,
     RATE_LIMIT_PER_MINUTE,
     ALLOWED_EXTENSIONS,
+    check_rate_limit,
 )
 import bot_logic
 import db
@@ -23,7 +22,8 @@ import max_api
 
 
 # ─── Rate limiting ───
-_rate_limit_store: dict[int, list[float]] = defaultdict(list)
+# Используем Redis (check_rate_limit из global_state) для синхронизации
+# между Gunicorn-воркерами
 
 
 async def _process_audio_and_respond(
@@ -40,7 +40,7 @@ async def _process_audio_and_respond(
                 user_id, "Не удалось распознать аудио."
             )
             return
-        
+
         reply_text = await bot_logic.handle_message(
             request, recognized_text, sender
         )
@@ -51,7 +51,7 @@ async def _process_audio_and_respond(
                 user_id, "Извините, не смог сформировать ответ."
             )
             return
-        
+
         await max_api.send_message(user_id, reply_text)
     except Exception as e:
         logger.error(
@@ -64,21 +64,15 @@ async def _process_audio_and_respond(
 
 def _check_rate_limit(user_id: int) -> bool:
     """
-    Проверяет лимит запросов для пользователя.
+    Проверяет лимит запросов для пользователя через Redis.
     Возвращает True, если запрос разрешён, False — если превышен.
     """
-    now = time.monotonic()
-    window = 60.0  # 1 минута
-    timestamps = _rate_limit_store[user_id]
-
-    # Удаляем устаревшие записи
-    timestamps[:] = [t for t in timestamps if now - t < window]
-
-    if len(timestamps) >= RATE_LIMIT_PER_MINUTE:
-        return False
-
-    timestamps.append(now)
-    return True
+    return check_rate_limit(
+        user_id,
+        action="message",
+        max_requests=RATE_LIMIT_PER_MINUTE,
+        window_seconds=60
+    )
 
 
 async def _process_file_async(

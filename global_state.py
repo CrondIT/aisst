@@ -1,7 +1,14 @@
 import os
+import sys
+import logging
 from dotenv import load_dotenv
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+
+# load_dotenv(override=True)
+load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
+
+logger = logging.getLogger(__name__)
 
 # Global variables that need to be accessible across the entire project
 # ВНИМАНИЕ: С переходом на Redis (USE_REDIS=true) эти словари не используются,
@@ -30,8 +37,6 @@ else:
 MAX_CONTEXT_MESSAGES = 5
 MAX_REF_IMAGES = 6  # Максимальное количество изображений для редактирования
 
-load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
-# load_dotenv(override=True)
 # разрешенные расширения для разных режимов
 # ext in ALLOWED_EXTENSIONS.get("guestrag") -> True или False
 ALLOWED_EXTENSIONS = {
@@ -298,6 +303,12 @@ DOCUMENT_JSON_SCHEMA = """
 # чтобы все Gunicorn воркеры видели одни и те же данные
 
 _use_redis = os.getenv("USE_REDIS", "false").lower() == "true"
+# Отладка УДАЛИТЬ!!!
+print(
+    f"[DEBUG] USE_REDIS={_use_redis}, env='{os.getenv('USE_REDIS')}'",
+        flush=True
+)
+
 _queue = None
 
 
@@ -310,7 +321,9 @@ def _get_queue():
 
             _queue = RedisQueue()
         except Exception as e:
-            print(f"⚠️ Не удалось инициализировать Redis очередь: {e}")
+            logging.warning(
+                 f"⚠️ Не удалось инициализировать Redis очередь: {e}"
+            )
             _use_redis = False
     return _queue
 

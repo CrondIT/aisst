@@ -9,7 +9,7 @@ import json
 import uuid
 import logging
 from typing import Optional, Dict, Any, List
-from redis_config import (
+from .redis_config import (
     REDIS_CONFIG,
     REDIS_PREFIX,
     REDIS_TTL,
