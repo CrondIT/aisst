@@ -90,6 +90,17 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
         set_user_mode(user_id, mode)
         # Очищаем состояние подтверждения удаления
         clear_user_pending_delete(user_id)
+        
+        # Для /mentor — очищаем состояние ментора и парсим новую команду
+        if command == "/mentor":
+            # Очищаем старое состояние ментора для новой сессии
+            clear_mentor_state(user_id)
+            
+            after_command = user_text[len(command):].strip()
+            if after_command:
+                # Текст после /mentor — пусть handle_message его обработает
+                return None
+        
         return reply
     
     return "Вы ввели неправильную команду"
@@ -144,19 +155,19 @@ async def handle_message(
                 
                 raw_text = user_text.strip()
                 
-                # Ищем "документ:" в тексте
+                # Ищем "документ:" в тексте (захватываем всё после него до конца строки)
                 import re
-                doc_match = re.search(r'документ:\s*(\S+)', raw_text, re.IGNORECASE)
+                doc_match = re.search(r'документ:\s*(.+)', raw_text, re.IGNORECASE | re.DOTALL)
                 if doc_match:
-                    doc_query = doc_match.group(1)
+                    doc_query = doc_match.group(1).strip()
                     document_name = find_document_name(doc_query)
                     if not document_name:
                         return f"Документ '{doc_query}' не найден в базе."
                     # Убираем часть с документом из текста
-                    raw_text = re.sub(r'документ:\s*\S+', '', raw_text, flags=re.IGNORECASE).strip()
+                    raw_text = re.sub(r'документ:\s*.+', '', raw_text, flags=re.IGNORECASE | re.DOTALL).strip()
                 
                 # Ищем "тема:" или берём всё как тему
-                topic_match = re.search(r'тема:\s*(.+)', raw_text, re.IGNORECASE)
+                topic_match = re.search(r'тема:\s*(.+)', raw_text, re.IGNORECASE | re.DOTALL)
                 if topic_match:
                     topic = topic_match.group(1).strip()
                 elif raw_text:
@@ -164,7 +175,10 @@ async def handle_message(
                 
                 # Если состояния нет — начинаем новую сессию
                 if mentor_state is None:
-                    if not topic:
+                    # Проверяем, есть ли что-то для начала сессии
+                    has_params = document_name or (topic and topic not in ("спрашивай", "начали", "старт", "go"))
+                    
+                    if not topic and not document_name:
                         return (
                             "Введите тему для проверки знаний.\n\n"
                             "Формат:\n"
@@ -173,18 +187,19 @@ async def handle_message(
                             "• тема:сварка документ:устав"
                         )
                     
-                    # Генерируем первый вопрос
+                    # Генерируем первый вопрос (question_number=1)
                     result = await generate_question(
-                        topic=topic,
+                        topic=topic if topic else "основы сварки",
                         lc_llm=lc_llm,
                         user_id=user_id,
                         document_name=document_name,
+                        question_number=1,
                     )
                     
                     if result["success"]:
                         set_mentor_state(user_id, {
                             "stage": "question",
-                            "topic": topic,
+                            "topic": topic if topic else "основы сварки",
                             "document_name": document_name,
                             "question": result["question"],
                             "context": result["context"],
@@ -195,14 +210,14 @@ async def handle_message(
                         
                         doc_info = f" (документ: {document_name})" if document_name else ""
                         return (
-                            f"Проверяю знания по теме: {topic}{doc_info}\n\n"
+                            f"Проверяю знания{doc_info}\n\n"
                             f"Вопрос 1:\n{result['question']}\n\n"
                             "Напишите ваш ответ."
                         )
                     else:
                         return result.get("error", "Не удалось найти материалы по теме.")
-                
-# Если есть активный вопрос — обрабатываем ответ студента
+
+                # Если есть активный вопрос — обрабатываем ответ студента
                 if mentor_state.get("stage") == "question":
                     student_answer = user_text.strip()
                     
@@ -259,19 +274,22 @@ async def handle_message(
                     await db.add_billing(user_id, user_mode, "оценка ответа", 0, 3)
                     return response
                 
-                # Этап обратной связи — пользователь решает продолжать или нет
+# Этап обратной связи — пользователь решает продолжать или нет
                 if mentor_state.get("stage") == "feedback":
                     user_decision = user_text.strip().lower()
                     
                     if user_decision in ("ещё", "да", "yes", "продолжить", "еще", "+"):
-                        # Генерируем следующий вопрос
+                        # Генерируем следующий вопрос с увеличенным номером
                         topic = mentor_state.get("topic", "")
                         document_name = mentor_state.get("document_name")
+                        next_question_num = mentor_state.get("question_count", 0) + 1
+                        
                         result = await generate_question(
                             topic=topic,
                             lc_llm=lc_llm,
                             user_id=user_id,
                             document_name=document_name,
+                            question_number=next_question_num,
                         )
                         
                         if result["success"]:
@@ -281,7 +299,8 @@ async def handle_message(
                                 "question": result["question"],
                                 "context": result["context"],
                             })
-                            return f"Следующий вопрос по теме '{topic}':\n\n{result['question']}"
+                            doc_info = f" ({mentor_state.get('document_name', '')})" if mentor_state.get("document_name") else ""
+                            return f"Вопрос {next_question_num}:\n\n{result['question']}"
                         else:
                             return result.get("error", "Не удалось сгенерировать следующий вопрос.")
                     
@@ -320,7 +339,7 @@ async def handle_message(
                             "Не понял. Напишите:\n"
                             "• 'ещё' — следующий вопрос\n"
                             "• 'хватит' — завершить проверку"
-)
+                        )
             case "edit":
                 return "Режим редактирования ещё не реализован."
             case "rag":
