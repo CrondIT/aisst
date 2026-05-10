@@ -251,3 +251,39 @@ async def transcribe_voice(
         raise HTTPException(
             status_code=500, detail=f"Ошибка транскрибации: {str(exc)}"
         )
+
+
+@router.get("/debug/memory")
+async def debug_memory(
+    x_admin_token: str = Depends(_verify_admin),
+):
+    """Отладка: показывает использование памяти процесса."""
+    import tracemalloc
+
+    if not tracemalloc.is_tracing():
+        return JSONResponse(
+            content={"status": "not_started", "message": "Трекинг памяти не запущен"}
+        )
+
+    current, peak = tracemalloc.get_traced_memory()
+    snapshot = tracemalloc.take_snapshot()
+
+    # Top 10 по использованию памяти
+    top_stats = snapshot.statistics('lineno')[:10]
+
+    result = {
+        "status": "ok",
+        "current_mb": round(current / 1024 / 1024, 2),
+        "peak_mb": round(peak / 1024 / 1024, 2),
+        "top_allocations": [
+            {
+                "file": str(stat.filename),
+                "line": stat.lineno,
+                "size_kb": round(stat.size / 1024, 2),
+                "count": stat.count,
+            }
+            for stat in top_stats
+        ]
+    }
+
+    return JSONResponse(content=result)

@@ -16,6 +16,21 @@ from rag_embeddings import get_giga_embeddings
 from utils import logger
 
 
+# ── Синглтон для ChromaDB ────────────────────────────────────────────────────
+# Хранит единственный инстанс базы в памяти, чтобы не создавать новый
+# при каждом запросе (предотвращает утечку памяти)
+_vector_db = None
+_vector_db_dir = None
+
+
+def reset_vector_db():
+    """Сбрасывает инстанс ChromaDB. Используется после добавления новых файлов."""
+    global _vector_db, _vector_db_dir
+    _vector_db = None
+    _vector_db_dir = None
+    logger.info("ChromaDB инстанс сброшен")
+
+
 # ── Настройки сплиттера ─────────────────────────────────────────────────────
 # GigaChat Embeddings: лимит 514 токенов на чанк.
 # ~1000 символов ≈ 400-450 токенов для обычного текста — безопасный размер.
@@ -57,16 +72,25 @@ def _extract_name_from_filename(filename: str) -> str:
 def check_vector_db(persist_dir: str, embeddings):
     """
     Загружает или создает векторную базу.
+    Использует синглтон: возвращает существующий инстанс, если директория не изменилась.
     При ошибке загрузки пробрасывает исключение.
     """
+    global _vector_db, _vector_db_dir
+
+    # Если инстанс уже есть и директория та же — возвращаем его
+    if _vector_db is not None and _vector_db_dir == persist_dir:
+        return _vector_db
+
+    # Создаём новый инстанс
     os.makedirs(persist_dir, exist_ok=True)
     try:
-        db = Chroma(
+        _vector_db = Chroma(
             persist_directory=persist_dir,
             embedding_function=embeddings
         )
+        _vector_db_dir = persist_dir
         logger.info(f"Инициализирована база в {persist_dir}")
-        return db
+        return _vector_db
     except Exception as e:
         logger.error(f"Ошибка при инициализации базы {persist_dir}: {e}")
         raise
@@ -393,7 +417,10 @@ def delete_file_from_vector_db(
         
         # Используем стандартный метод delete
         vector_db.delete(where={"filename": file_name})
-        
+
+        # Сбрасываем синглтон, чтобы при следующем запросе загрузить актуальную базу
+        reset_vector_db()
+
         # Проверяем, что удаление прошло успешно
         verify = vector_db.get(where={"filename": file_name}, include=[])
         if verify and verify.get("ids"):

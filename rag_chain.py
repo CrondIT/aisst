@@ -3,18 +3,71 @@
 Версия 2: умное извлечение источника — статья/раздел/глава из текста чанка.
 """
 
+import gc
 import os
 import re
+import tracemalloc
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.language_models import BaseChatModel
 
-from load_from_file import check_vector_db
 from rag_embeddings import get_giga_embeddings
 from global_state import GUEST_RAG_DIR
 from utils import logger
+
+
+# ── Мониторинг памяти ─────────────────────────────────────────────────────────
+_MEMORY_THRESHOLD_MB = 300  # Порог предупреждения в MB
+_tracemalloc_started = False
+
+
+def _start_memory_tracking():
+    """Запускает отслеживание памяти (один раз)."""
+    global _tracemalloc_started
+    if not _tracemalloc_started:
+        tracemalloc.start()
+        _tracemalloc_started = True
+
+
+def _log_memory_usage(prefix: str = ""):
+    """Логирует использование памяти. Вызывает WARNING если превышен порог."""
+    current, peak = tracemalloc.get_traced_memory()
+    current_mb = current / 1024 / 1024
+    peak_mb = peak / 1024 / 1024
+
+    if current_mb > _MEMORY_THRESHOLD_MB:
+        logger.warning(
+            f"{prefix}Память: текущая {current_mb:.1f} MB, "
+            f"пиковая {peak_mb:.1f} MB (превышен порог {_MEMORY_THRESHOLD_MB} MB)"
+        )
+    else:
+        logger.debug(
+            f"{prefix}Память: текущая {current_mb:.1f} MB, "
+            f"пиковая {peak_mb:.1f} MB"
+        )
+
+
+def list_all_documents_in_db(vector_db) -> list[str]:
+    """Возвращает список уникальных имён файлов в ChromaDB."""
+    try:
+        all_docs = vector_db.get()
+        sources = set()
+        for doc in all_docs.get("metadatas", []):
+            if doc and "source" in doc:
+                source = doc["source"]
+                filename = os.path.basename(source)
+                # Убираем префиксы
+                filename = re.sub(r"^rag_\d+_", "", filename)
+                filename = re.sub(r"^file_\d+_", "", filename)
+                filename = re.sub(r"^[\w]+_\d+_", "", filename)
+                filename = os.path.splitext(filename)[0]
+                sources.add(filename)
+        return sorted(sources)
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка документов: {e}")
+        return []
 
 
 # ── Паттерны для извлечения заголовков из текста чанка ───────────────────────
@@ -80,17 +133,17 @@ def _make_source_label(doc) -> str:
 def _format_docs(docs: list) -> str:
     """
     Склеивает найденные документы в строку контекста.
-    Каждый фрагмент помечен меткой [N] с указанием источника.
-    Модель увидит эти метки и воспроизведёт их в ответе.
+    Каждый фрагмент начинается с названия документа.
+    Модель должна скопировать название документа в ответ.
     """
     if not docs:
         return "Документы по вашему вопросу не найдены."
 
     parts = []
-    for i, doc in enumerate(docs, 1):
+    for doc in docs:
         label = _make_source_label(doc)
         parts.append(
-            f"[{i}] Источник: {label}\n"
+            f"Документ: {label}\n"
             f"{doc.page_content.strip()}"
         )
     return "\n\n".join(parts)
@@ -108,9 +161,10 @@ _SYSTEM_PROMPT = (
     "Если информация противоречит — укажи это.\n"
     "Отвечай кратко: 5-12 предложений.\n"
     "Не придумывай факты.\n"
-    "ВАЖНО: в конце ответа ОБЯЗАТЕЛЬНО укажи источники в формате:\n"
-    "📄 Источники: <название файла 1>, <Статья/Раздел>; "
-    "<название файла 2>, <Статья/Раздел>; ...\n\n"
+    "ВАЖНО: в конце ответа ОБЯЗАТЕЛЬНО укажи источники.\n"
+    "Формат: «Название документа», <Статья/Раздел>\n"
+    "Пример: «ФЗ от 5 апреля 2013 г N 44 ФЗ О контрактной системе», Статья 32\n"
+    "Копируй название документа ТОЧНО как указано в поле 'Документ:'.\n\n"
     "Фрагменты документов:\n{context}"
 )
 
@@ -120,33 +174,29 @@ _PROMPT = ChatPromptTemplate.from_messages([
 ])
 
 
-async def ask_rag(
-    user_text: str,
-    lc_llm: BaseChatModel,
-    top_k: int = 12,
-    fetch_k: int = 30,
-    lambda_mult: float = 0.7,
-) -> str:
-    """
-    Поиск ответа в ChromaDB + генерация через LangChain-совместимый LLM.
-    Использует MMR (Maximum Marginal Relevance) для разнообразия источников.
+# ── Синглтон для LCEL-цепочки ───────────────────────────────────────────────
+_rag_chain = None
+_rag_chain_llm = None
+_rag_chain_params = None
 
-    Args:
-        user_text: Вопрос пользователя.
-        lc_llm:    LangChain-совместимая модель (app.state.giga_lc_client).
-        top_k:     Количество фрагментов в финальном результате (после MMR).
-        fetch_k:   Количество кандидатов для начального поиска (до MMR).
-        lambda_mult: Параметр MMR (0-1). Ближе к 1 = важнее релевантность,
-                     ближе к 0 = важнее разнообразие.
 
-    Returns:
-        Строка с ответом + указание источника.
+def _get_rag_chain(lc_llm: BaseChatModel, top_k: int = 5, fetch_k: int = 20, lambda_mult: float = 0.9):
     """
-    try:
+    Возвращает синглтон LCEL-цепочки для RAG.
+    Пересоздаёт цепочку только если LLM или параметры изменились.
+    """
+    global _rag_chain, _rag_chain_llm, _rag_chain_params
+
+    current_params = (id(lc_llm), top_k, fetch_k, lambda_mult)
+
+    if _rag_chain is None or _rag_chain_params != current_params:
+        from load_from_file import check_vector_db
+        from global_state import GUEST_RAG_DIR
+        from rag_embeddings import get_giga_embeddings
+
         embeddings = get_giga_embeddings(model_name="Embeddings")
-        vector_db = check_vector_db(
-            persist_dir=GUEST_RAG_DIR, embeddings=embeddings
-        )
+        vector_db = check_vector_db(persist_dir=GUEST_RAG_DIR, embeddings=embeddings)
+
         retriever = vector_db.as_retriever(
             search_type="mmr",
             search_kwargs={
@@ -156,7 +206,7 @@ async def ask_rag(
             }
         )
 
-        chain = (
+        _rag_chain = (
             {
                 "context": retriever | RunnableLambda(_format_docs),
                 "question": RunnablePassthrough(),
@@ -165,9 +215,52 @@ async def ask_rag(
             | lc_llm
             | StrOutputParser()
         )
+        _rag_chain_llm = lc_llm
+        _rag_chain_params = current_params
+
+    return _rag_chain
+
+
+async def ask_rag(
+    user_text: str,
+    lc_llm: BaseChatModel,
+    top_k: int = 5,
+    fetch_k: int = 20,
+    lambda_mult: float = 0.9,
+) -> str:
+    """
+    Поиск ответа в ChromaDB + генерация через LangChain-совместимый LLM.
+    Использует MMR (Maximum Marginal Relevance) для разнообразия источников.
+    LCEL-цепочка кэшируется в синглтоне.
+
+    Args:
+        user_text: Вопрос пользователя.
+        lc_llm:    LangChain-совместимая модель (app.state.giga_lc_client).
+        top_k:     Количество фрагментов в финальном результате (после MMR).
+        fetch_k:   Количество кандидатов для начального поиска (до MMR).
+        lambda_mult: Параметр MMR (0-1). Ближе к 1 = важнее релевантность,
+                     ближе к 0 — важнее разнообразие.
+
+    Returns:
+        Строка с ответом + указание источника.
+    """
+    try:
+        _start_memory_tracking()
+        chain = _get_rag_chain(lc_llm, top_k, fetch_k, lambda_mult)
 
         answer: str = await chain.ainvoke(user_text)
         logger.info(f"RAG ответ: {len(answer)} символов")
+
+        # Очистка памяти после каждого запроса
+        gc.collect()
+        _log_memory_usage("RAG: ")
+
+        # Если ответ содержит "не найден" — предупреждаем
+        if "не найден" in answer.lower():
+            logger.warning(
+                f"RAG: модель не нашла информацию. Запрос: '{user_text}'"
+            )
+
         return answer
 
     except Exception as e:

@@ -37,9 +37,9 @@ mode_map = {
         "gigachatpro",
         "Режим: GigaChat Pro"
     ),
-    "/file": (
-        "file",
-        "Режим: анализ файлов"
+    "/mentor": (
+        "mentor",
+        "Режим: Проверка знаний по теме Сварка"
     ),
     "/edit": (
         "edit",
@@ -133,7 +133,7 @@ async def handle_message(
             )
             await db.add_billing(user_id, user_mode, user_text, 0, 5)
             return answer
-        case "file":
+        case "mentor":
            pass
         case "edit":
             return "Режим редактирования ещё не реализован."
