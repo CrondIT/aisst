@@ -14,6 +14,7 @@ import olefile
 from odf.opendocument import load
 from odf.text import P
 from odf import table, draw
+from pathlib import Path
 
 
 SUPPORTED_EXTENSIONS = [
@@ -411,9 +412,14 @@ async def extract_text_from_pptx(file_path: str) -> str:
         raise Exception(f"Error processing PPTX file: {str(e)}")
 
 
-async def process_uploaded_file(file_path: str, file_extension: str) -> str:
+async def process_uploaded_file(
+        file_path: str, file_extension: str = None
+) -> str:
     """Process uploaded file based on its extension and return extracted text
     """
+    if file_extension is None:
+        path = Path(file_path)
+        file_extension = path.suffix.lower()
     if file_extension.lower() == ".pdf":
         return await extract_text_from_pdf_with_ocr(file_path)
     elif file_extension.lower() in [

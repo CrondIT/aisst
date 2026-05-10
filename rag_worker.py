@@ -109,9 +109,10 @@ async def run_worker():
 
                     try:
                         result = await process_rag_task(task.get("data", {}))
+                        logger.info(f"process_rag_task result type: {type(result)}, value: {result}")
                         queue.publish_result(task_id, result)
 
-                        if result["status"] == "completed":
+                        if isinstance(result, dict) and "status" in result and result["status"] == "completed":
                             logger.info(
                                 f"Задача {task_id[:8]}... выполнена "
                                 f"для user_id={result.get('user_id')}"

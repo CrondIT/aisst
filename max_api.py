@@ -109,9 +109,7 @@ async def send_image(
 
 BUTTONS = [
     {"text": "Чат с агентом", "command": "/gigachat"},
-    {"text": "Чат с агентом", "command": "/gigachatpro"},
-    {"text": "Анализ файлов", "command": "/file"},
-    {"text": "Изображения", "command": "/edit"},
+    {"text": "Чат с ИИ", "command": "/gigachatpro"},
     {"text": "Настройки агента", "command": "/rag"},
     {"text": "Оплата", "command": "/billing"},
 ]

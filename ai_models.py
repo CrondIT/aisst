@@ -40,7 +40,17 @@ class GigaChatClient:
         )
         try:
             response = await self.client.achat(chat)
+            logger.debug(f"GigaChat API response: {response}")
+
+            if not hasattr(response, 'choices') or not response.choices:
+                logger.error(f"Пустой ответ от GigaChat API: {response}")
+                raise RuntimeError("Пустой ответ от GigaChat API")
+
             content = response.choices[0].message.content
+            if content is None:
+                logger.error(f"content=None в ответе: {response}")
+                raise RuntimeError("Пустой контент в ответе GigaChat")
+
             logger.info(f"GigaChat: ответ ({len(content)} символов)")
             return content
         except AuthenticationError as e:
@@ -73,6 +83,10 @@ class GigaChatClient:
             logger.error(f"GigaChat error: {e}")
             raise RuntimeError(f"Ошибка GigaChat: {e}")
         except Exception as e:
+            error_str = str(e).lower()
+            if "402" in error_str or "payment" in error_str or "payment required" in error_str:
+                logger.error(f"GigaChat: 402 Payment Required - закончились токены")
+                raise RuntimeError("⏰ Услуга временно недоступна. Закончились токены на тарифе GigaChat.")
             logger.error(f"Unexpected error in generate(): {e}", exc_info=True)
             raise RuntimeError(f"Ошибка при генерации текста: {e}")
 
@@ -80,7 +94,7 @@ class GigaChatClient:
         self,
         messages: List[dict],
         temperature: float = 0.7,
-        max_tokens: int = 2048,
+        max_tokens: int = 4096,
         model: Optional[str] = None,
     ) -> str:
         """
@@ -134,7 +148,17 @@ class GigaChatClient:
         
         try:
             response = await self.client.achat(chat)
+            logger.debug(f"GigaChat API response: {response}")
+
+            if not hasattr(response, 'choices') or not response.choices:
+                logger.error(f"Пустой ответ от GigaChat API: {response}")
+                raise RuntimeError("Пустой ответ от GigaChat API")
+
             content = response.choices[0].message.content
+            if content is None:
+                logger.error(f"content=None в ответе: {response}")
+                raise RuntimeError("Пустой контент в ответе GigaChat")
+
             logger.info(f"GigaChat.chat: ответ ({len(content)} символов)")
             return content
         except AuthenticationError as e:
@@ -162,5 +186,9 @@ class GigaChatClient:
             logger.error(f"GigaChat error: {e}")
             raise RuntimeError(f"Ошибка GigaChat: {e}")
         except Exception as e:
+            error_str = str(e).lower()
+            if "402" in error_str or "payment" in error_str or "payment required" in error_str:
+                logger.error(f"GigaChat: 402 Payment Required - закончились токены")
+                raise RuntimeError("⏰ Услуга временно недоступна. Закончились токены на тарифе GigaChat.")
             logger.error(f"Unexpected error in chat(): {e}", exc_info=True)
             raise RuntimeError(f"Ошибка при генерации текста: {e}")

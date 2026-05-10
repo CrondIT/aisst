@@ -7,6 +7,8 @@ import db
 from global_state import (
     get_user_mode,
     set_user_mode,
+    set_user_file_data,
+    get_user_file_data,
     get_user_pending_delete,
     set_user_pending_delete,
     clear_user_pending_delete,
@@ -19,9 +21,12 @@ from load_from_file import (
     get_all_filenames_from_vector_db,
     delete_file_from_vector_db,
 )
-from handle_utils import handle_file_analysis_mode
+
+from prompt_builder import full_prompt
 
 from rag_chain import ask_rag  # ← единственный импорт для RAG
+
+import extract_text_from_file_utils
 
 mode_map = {
     "/gigachat": (
@@ -113,27 +118,32 @@ async def handle_message(
             return answer
             
         case "gigachatpro":
-            answer = await request.app.state.giga_client.generate(
-                user_text,
-                model="GigaChat-Max",
+            # проверяем есть ли файл для (анализа) включения в контекст
+            extracted_text = ""
+            file_data = get_user_file_data(user_id)
+            if file_data and "extracted_text" in file_data:
+                extracted_text = file_data["extracted_text"]
+            # получаем полный промпт с текстом файла  историей
+            # и контролем токенов
+            user_prompt = await full_prompt(user_id, user_text, extracted_text)
+            #
+            answer = await request.app.state.giga_client.chat(
+                messages=user_prompt,
+                model="GigaChat",
             )
             await db.add_billing(user_id, user_mode, user_text, 0, 5)
             return answer
         case "file":
-            return await handle_file_analysis_mode(
-                user_id,
-                user_text,
-                sender,
-                request,
-            )
+           pass
         case "edit":
             return "Режим редактирования ещё не реализован."
         case "rag":
             user_text = user_text.strip()
             user_id = int(sender.get("user_id"))
 
-            # Проверка состояния подтверждения удаления
+            # Проверка состояния чтоесть файл на удаление
             pending = get_user_pending_delete(user_id)
+            # если ожидаем удаление файлв то спрашиваем подтверждение удаления
             if pending is not None:
                 confirmations = {
                     "1", "да", "yes", "ok"
@@ -148,14 +158,16 @@ async def handle_message(
                 else:
                     clear_user_pending_delete(user_id)
                     return "Удаление отменено."
-            
+            # выводим список документов в базе, если пользователь набрал ls
             if user_text.lower() == "ls":
-                # выводим список документов в базе, если пользователь набрал ls
                 docs_list = get_all_filenames_from_vector_db()
                 await db.add_billing(user_id, user_mode, user_text, 0, 1)
                 return docs_list
             
-            # поиск файла по имени для возможного удаления
+            # поиск файла по имени для возможного удаления 
+            # если пользователь что то набрал, 
+            # что бы он ни набрал считаем что это часть имени файла 
+            # из векторной базы и пытаемся найти файл
             result = get_all_filenames_from_vector_db(search_text=user_text)
             if result and not result.startswith("Файл с таким"):
                 # Файл найден, запрашиваем подтверждение
@@ -186,6 +198,7 @@ async def handle_file(file_name: str, sender: dict) -> str | None:
     """Обработка файлов. Использует Redis очередь для больших файлов."""
     user_id = int(sender.get("user_id"))
     user_mode = get_user_mode(user_id)
+    # если в режиме rag то загруженный файл отправляем в векторную базу
     if user_mode == "rag":
         if _use_redis:
             try:
@@ -212,5 +225,18 @@ async def handle_file(file_name: str, sender: dict) -> str | None:
             user_id, user_mode, "save_to_vector_db", 0, 5, notes=result
         )
         return result
-    return "Режим еще не работает"
+    # если любой другой режим то на данном этапе файл уже сохранен 
+    # во временной папке, фиксируем путь в 
+    # кроме режима редактирования изображений
+    else:
+        # извлекаем содержимое файла
+        extracted_text = await extract_text_from_file_utils.process_uploaded_file(
+                file_name
+            )
+        # сохраняем содержимое файла
+        set_user_file_data(user_id, {"extracted_text": extracted_text})
+        # получаем ответ от модели
+        # выдаем ответ в виде текста или в виде файла как просил пользователь
+        return "Файл получен"
+
 

@@ -82,6 +82,8 @@ MODELS = {
     "image": "gemini-3-pro-image-preview",
     "edit": "gemini-3-pro-image-preview",
     "ai_file": "gpt-5.2-chat-latest",
+    "gigachat" : "GigaChat",
+    "gigachatpro" : "GigaChat"
 }
 
 # ─── Настройки webhook ───
@@ -118,6 +120,7 @@ def get_token_limit(model_name: str) -> int:
     """
     Get the maximum token limit for a specific model
     """
+    model_name_lower = model_name.lower()
     limits = {
         # OpenAI models
         "gpt-5.2": 128000,
@@ -146,7 +149,7 @@ def get_token_limit(model_name: str) -> int:
         "embeddings": 8192,
     }
 
-    return limits.get(model_name, 4096)  # Default fallback
+    return limits.get(model_name_lower, 4096)  # Default fallback
 
 
 # Maximum cost per message
