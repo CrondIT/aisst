@@ -33,6 +33,7 @@ else:
     user_contexts = user_modes = user_edit_data = user_file_data = {}
     user_edit_pending = user_pending_delete = user_previous_modes = {}
     edited_photo_id = user_last_edited_images = user_edit_images_queue = {}
+    user_mentor_state = {}  # Состояние ментора для каждого пользователя
 
 MAX_CONTEXT_MESSAGES = 5
 MAX_REF_IMAGES = 6  # Максимальное количество изображений для редактирования
@@ -612,4 +613,51 @@ def close_redis_connection():
     if _queue:
         _queue.close()
         _queue = None
+
+
+# ==================== Mentor Agent State ====================
+
+def get_mentor_state(user_id: int) -> dict | None:
+    """
+    Получает состояние ментора для пользователя.
+    
+    Returns:
+        dict с ключами:
+        - stage: str ("idle" | "question" | "feedback")
+        - topic: str - тема проверки
+        - question: str - текущий вопрос
+        - context: str - контекст из ChromaDB
+        - question_count: int - количество заданных вопросов
+        - correct_count: int - количество правильных ответов
+        или None если состояния нет
+    """
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            return q.get_user_state(user_id, "mentor_state")
+    else:
+        return user_mentor_state.get(user_id)
+    return None
+
+
+def set_mentor_state(user_id: int, state: dict):
+    """Сохраняет состояние ментора для пользователя"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.set_user_state(user_id, "mentor_state", state)
+    else:
+        global user_mentor_state
+        user_mentor_state[user_id] = state
+
+
+def clear_mentor_state(user_id: int):
+    """Очищает состояние ментора для пользователя"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.delete_user_state(user_id, "mentor_state")
+    else:
+        global user_mentor_state
+        user_mentor_state.pop(user_id, None)
 
