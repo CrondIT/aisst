@@ -136,8 +136,14 @@ def get_token_limit(model_name: str) -> int:
         "gemini-3-pro-image-preview": 32768,
         "gemini-1.5-pro": 1048576,
         "gemini-1.0-pro": 32768,
-        # Giga Chat models
-
+        # GigaChat models
+        "gigachat-2-max": 128000,
+        "gigachat-2-pro": 32768,
+        "gigachat-2": 8192,
+        "gigachat-4": 128000,
+        "gigachat": 8192,
+        # GigaChat Embeddings (not used for chat, just for similarity)
+        "embeddings": 8192,
     }
 
     return limits.get(model_name, 4096)  # Default fallback

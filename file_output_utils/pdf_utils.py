@@ -19,9 +19,6 @@ from reportlab.pdfbase.ttfonts import TTFont
 import io
 import json
 from global_state import DOCUMENT_JSON_SCHEMA
-from telegram import InputFile
-from telegram.helpers import escape_markdown
-from message_utils import send_long_message
 from reportlab.lib.colors import Color as RLColor
 import reportlab.lib.colors as colors_module
 
@@ -1437,50 +1434,52 @@ def check_user_wants_pdf_format(user_message):
     )
 
 
-async def send_pdf_response(update, reply):
+async def send_pdf_response(user_id: int, reply: str):
     """
-    Отправляет PDF-файл с ответом пользователю.
-
+    Отправляет PDF-файл с ответом пользователю через MAX API.
+    
     Args:
-        update: Объект обновления Telegram
+        user_id: ID пользователя в MAX
         reply: Ответ от модели, который будет преобразован в PDF
     """
+    import max_api
+    from utils import logger
+    
     try:
-        # Проверяем, что reply не пустой
         if not reply or reply.strip() == "":
             raise ValueError("Пустой ответ от модели")
-        # Удаляем маркеры кода, если они есть
+
         cleaned_reply = reply.strip()
         if cleaned_reply.startswith("```json"):
-            cleaned_reply = cleaned_reply[7:]  # Удаляем '```json'
+            cleaned_reply = cleaned_reply[7:]
         elif cleaned_reply.startswith("```"):
-            cleaned_reply = cleaned_reply[3:]  # Удаляем '```'
+            cleaned_reply = cleaned_reply[3:]
 
         if cleaned_reply.endswith("```"):
-            cleaned_reply = cleaned_reply[:-3]  # Удаляем закрывающий '```'
+            cleaned_reply = cleaned_reply[:-3]
 
         cleaned_reply = cleaned_reply.strip()
         data = json.loads(cleaned_reply)
         pdf_buffer = create_pdf_from_json(data)
+        pdf_bytes = pdf_buffer.getvalue()
 
-        await update.message.reply_document(
-            document=InputFile(pdf_buffer, filename="document.pdf"),
+        result = await max_api.send_document(
+            user_id=user_id,
+            file_data=pdf_bytes,
+            filename="document.pdf",
             caption="Ваш ответ в формате PDF",
+            file_type="file"
         )
+        
+        if result != 200:
+            logger.error(f"Ошибка отправки PDF: status={result}")
+            
     except json.JSONDecodeError as e:
-        # Если ответ не является валидным JSON,
-        # отправляем обычное сообщение
-        safe_reply = escape_markdown(reply, version=2)
-        await send_long_message(update, safe_reply, parse_mode="MarkdownV2")
-        print(f"Ошибка разбора JSON при создании PDF: {e}")
+        logger.error(f"Ошибка разбора JSON при создании PDF: {e}")
+        await max_api.send_message(user_id, "Не удалось создать PDF документ.")
     except ValueError as e:
-        # Если возникла ошибка значения (например, пустой ответ)
-        safe_reply = escape_markdown(reply, version=2)
-        await send_long_message(update, safe_reply, parse_mode="MarkdownV2")
-        print(f"Ошибка значения при создании PDF: {e}")
+        logger.error(f"Ошибка значения при создании PDF: {e}")
+        await max_api.send_message(user_id, "Пустой ответ от модели.")
     except Exception as e:
-        # Если не удалось создать или отправить PDF,
-        # отправляем обычное сообщение
-        safe_reply = escape_markdown(reply, version=2)
-        await send_long_message(update, safe_reply, parse_mode="MarkdownV2")
-        print(f"Ошибка при создании или отправке PDF файла: {e}")
+        logger.error(f"Ошибка при создании или отправке PDF файла: {e}")
+        await max_api.send_message(user_id, f"Ошибка при создании PDF: {str(e)}")

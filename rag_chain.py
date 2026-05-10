@@ -58,11 +58,13 @@ def _make_source_label(doc) -> str:
     """
     meta = doc.metadata
 
-    # Имя файла: берём basename, убираем служебный префикс "rag_12345_"
+    # Имя файла: берём basename, убираем служебные префиксы
     raw_source = meta.get("source", "")
     filename = os.path.basename(raw_source)
     filename = os.path.splitext(filename)[0]
-    filename = re.sub(r"^rag_\d+_", "", filename)
+    filename = re.sub(r"^rag_\d+_", "", filename)  # rag_12345_
+    filename = re.sub(r"^file_\d+_", "", filename)  # file_4827597_
+    filename = re.sub(r"^[\w]+_\d+_", "", filename)  # любой_префикс_цифры_
 
     # Номер страницы (PyPDFLoader считает с 0, показываем с 1)
     # page = meta.get("page")
@@ -101,13 +103,14 @@ _SYSTEM_PROMPT = (
     "cреднее профессиональное образование.\n"
     "Не включай в ответ информацию про высшее образование и про ВУЗы\n"
     "Отвечай ТОЛЬКО на основе предоставленных фрагментов документов.\n"
-    "Если в документах нет ответа — прямо скажи об этом.\n"
-    "Если в документах несколько фактов приведи их все \n"
-    "Отвечай кратко: не более 6–10 предложений.\n"
+    "Внимательно изучи ВСЕ предоставленные фрагменты и объедини информацию.\n"
+    "Если в документах несколько фактов — приведи их все.\n"
+    "Если информация противоречит — укажи это.\n"
+    "Отвечай кратко: 5-12 предложений.\n"
     "Не придумывай факты.\n"
-    "ВАЖНО: в конце ответа ОБЯЗАТЕЛЬНО укажи источник в формате:\n"
-    "📄 Источник: <название файла>, <заголовок>, "
-    "<Статья или Раздел если найдены>\n\n"
+    "ВАЖНО: в конце ответа ОБЯЗАТЕЛЬНО укажи источники в формате:\n"
+    "📄 Источники: <название файла 1>, <Статья/Раздел>; "
+    "<название файла 2>, <Статья/Раздел>; ...\n\n"
     "Фрагменты документов:\n{context}"
 )
 
@@ -120,15 +123,21 @@ _PROMPT = ChatPromptTemplate.from_messages([
 async def ask_rag(
     user_text: str,
     lc_llm: BaseChatModel,
-    top_k: int = 3,
+    top_k: int = 12,
+    fetch_k: int = 30,
+    lambda_mult: float = 0.7,
 ) -> str:
     """
     Поиск ответа в ChromaDB + генерация через LangChain-совместимый LLM.
+    Использует MMR (Maximum Marginal Relevance) для разнообразия источников.
 
     Args:
         user_text: Вопрос пользователя.
         lc_llm:    LangChain-совместимая модель (app.state.giga_lc_client).
-        top_k:     Количество фрагментов для поиска.
+        top_k:     Количество фрагментов в финальном результате (после MMR).
+        fetch_k:   Количество кандидатов для начального поиска (до MMR).
+        lambda_mult: Параметр MMR (0-1). Ближе к 1 = важнее релевантность,
+                     ближе к 0 = важнее разнообразие.
 
     Returns:
         Строка с ответом + указание источника.
@@ -138,7 +147,14 @@ async def ask_rag(
         vector_db = check_vector_db(
             persist_dir=GUEST_RAG_DIR, embeddings=embeddings
         )
-        retriever = vector_db.as_retriever(search_kwargs={"k": top_k})
+        retriever = vector_db.as_retriever(
+            search_type="mmr",
+            search_kwargs={
+                "k": top_k,
+                "fetch_k": fetch_k,
+                "lambda_mult": lambda_mult,
+            }
+        )
 
         chain = (
             {

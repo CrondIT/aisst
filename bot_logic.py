@@ -19,6 +19,7 @@ from load_from_file import (
     get_all_filenames_from_vector_db,
     delete_file_from_vector_db,
 )
+from handle_utils import handle_file_analysis_mode
 
 from rag_chain import ask_rag  # ← единственный импорт для RAG
 
@@ -106,7 +107,7 @@ async def handle_message(
         case "gigachat":
             lc_llm = request.app.state.giga_lc_client
             answer = await ask_rag(
-                user_text=user_text, lc_llm=lc_llm, top_k=3
+                user_text=user_text, lc_llm=lc_llm,
             )
             await db.add_billing(user_id, user_mode, user_text, 0, 2)
             return answer
@@ -119,7 +120,12 @@ async def handle_message(
             await db.add_billing(user_id, user_mode, user_text, 0, 5)
             return answer
         case "file":
-            return "Режим работы с файлами ещё не реализован."
+            return await handle_file_analysis_mode(
+                user_id,
+                user_text,
+                sender,
+                request,
+            )
         case "edit":
             return "Режим редактирования ещё не реализован."
         case "rag":

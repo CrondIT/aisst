@@ -8,54 +8,90 @@ class TokenCounter:
     Utility class to count tokens for different AI models
     """
 
+    # Энкодеры для разных семейств моделей
+    # OpenAI/GigaChat используют cl100k_base
+    ENCODER_CACHE = {
+        "cl100k_base": None,  # Для OpenAI и GigaChat
+        "o200k_base": None,    # Для GPT-4o
+    }
+
     def __init__(self):
-        # Initialize encoders for OpenAI models
         self.openai_encoders = {}
+        # Предзагружаем cl100k_base (используется для GigaChat)
+        try:
+            self.openai_encoders["cl100k_base"] = tiktoken.get_encoding(
+                "cl100k_base"
+            )
+        except Exception:
+            pass
 
-    def count_openai_tokens(
-        self, text: Union[str, None, Any], model: str
-    ) -> int:
+    def _get_encoder(self, model: str):
         """
-        Count tokens for OpenAI models using tiktoken
-        Accepts string, None, or other types
-        and converts them to string for processing
+        Получает подходящий энкодер для модели.
+        GigaChat использует тот же токенизатор, что и GPT-4 (cl100k_base).
         """
-        # Convert text to string if it's not already,
-        # handling None and other types
-        if text is None:
-            text = ""
-        elif not isinstance(text, str):
-            text = str(text)
+        # Модели GigaChat
+        gigachat_models = [
+            "gigachat-2-max", "gigachat-2-pro", "gigachat-2",
+            "gigachat-4", "gigachat"
+        ]
+        
+        # Проверяем, является ли модель GigaChat
+        for gm in gigachat_models:
+            if gm in model.lower():
+                # GigaChat использует cl100k_base
+                encoder_key = "cl100k_base"
+                if encoder_key not in self.openai_encoders:
+                    try:
+                        self.openai_encoders[encoder_key] = (
+                            tiktoken.get_encoding(encoder_key)
+                        )
+                    except Exception:
+                        return None
+                return self.openai_encoders[encoder_key]
 
-        if "dall-e" in model:
-            # For image generation models, return a simple character count
-            # or use a fixed limit for prompt length
-            return len(text)
-
+        # Для остальных моделей используем стандартную логику tiktoken
         if model not in self.openai_encoders:
             try:
                 self.openai_encoders[model] = tiktoken.encoding_for_model(
                     model
                 )
             except KeyError:
-                # Для неизвестных моделей используем
-                # cl100k_base как универсальный энкодер
                 self.openai_encoders[model] = tiktoken.get_encoding(
                     "cl100k_base"
                 )
-                # Или можно закэшировать под другим ключом,
-                # если важно различать
+        
+        return self.openai_encoders[model]
 
-        encoder = self.openai_encoders[model]
+    def count_openai_tokens(
+        self, text: Union[str, None, Any], model: str
+    ) -> int:
+        """
+        Count tokens for OpenAI и GigaChat моделей.
+        GigaChat использует тот же токенизатор, что и GPT-4.
+        """
+        if text is None:
+            text = ""
+        elif not isinstance(text, str):
+            text = str(text)
+
+        if "dall-e" in model:
+            return len(text)
+
+        encoder = self._get_encoder(model)
+        if encoder is None:
+            # Fallback: приблизительная оценка (1 токен ~ 4 символа)
+            return len(text) // 4
+        
         return len(encoder.encode(text))
 
     def count_openai_messages_tokens(
         self, messages: List[Dict], model: str
     ) -> int:
-        # Handle image generation models separately
+        """
+        Count tokens for message list (OpenAI и GigaChat).
+        """
         if "dall-e" in model:
-            # For image generation models,
-            # count the total characters in all text messages
             total_chars = 0
             for message in messages:
                 for key, value in message.items():
@@ -67,23 +103,17 @@ class TokenCounter:
                                 total_chars += len(item["text"])
             return total_chars
 
-        if model not in self.openai_encoders:
-            try:
-                self.openai_encoders[model] = tiktoken.encoding_for_model(
-                    model
-                )
-            except KeyError:
-                # Для неизвестных моделей используем
-                # cl100k_base как универсальный энкодер
-                self.openai_encoders[model] = tiktoken.get_encoding(
-                    "cl100k_base"
-                )
-                # Или можно закэшировать под другим ключом,
-                # если важно различать
+        encoder = self._get_encoder(model)
+        if encoder is None:
+            # Fallback: приблизительная оценка по символам
+            total_chars = 0
+            for message in messages:
+                for key, value in message.items():
+                    if isinstance(value, str):
+                        total_chars += len(value)
+            return total_chars // 4  # ~1 токен на 4 символа
 
-        encoder = self.openai_encoders[model]
-
-        tokens_per_message = 3  # <|start|>{role}|<|message|>{content}|<|end|>
+        tokens_per_message = 3
         tokens_per_name = 1
 
         total_tokens = 0
@@ -91,15 +121,12 @@ class TokenCounter:
             total_tokens += tokens_per_message
             for key, value in message.items():
                 if isinstance(value, str):
-                    # Convert to string to ensure it's properly handled
                     str_value = str(value) if value is not None else ""
                     total_tokens += len(encoder.encode(str_value))
                 elif isinstance(value, list):
-                    # Если content — список (например, текст + изображение)
                     for item in value:
                         if isinstance(item, dict):
                             if "text" in item:
-                                # Ensure the text is a string
                                 text_value = (
                                     str(item["text"])
                                     if item["text"] is not None
@@ -108,17 +135,14 @@ class TokenCounter:
                                 total_tokens += len(
                                     encoder.encode(text_value)
                                 )
-                            # изображения: не кодируются напрямую
                 if key == "name":
                     total_tokens += tokens_per_name
-        total_tokens += 3  # <|end|> в конце
+        total_tokens += 3
         return total_tokens
 
     def estimate_gemini_tokens(self, text: str) -> int:
         """
         Estimate tokens for Gemini models
-        (Google doesn't provide exact count without API call)
-        Using rough estimation: 1 token ~ 4 characters
         """
         return len(text) // 4
 
@@ -126,8 +150,7 @@ class TokenCounter:
         """
         Estimate tokens for images in Gemini (rough estimation)
         """
-        # Images take more tokens, using a rough estimation
-        return min(len(image_bytes) // 250, 200)  # Max 200 tokens for images
+        return min(len(image_bytes) // 250, 200)
 
 
 # Create a global instance

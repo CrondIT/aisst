@@ -205,3 +205,10 @@ sudo systemctl restart aisst
 redis-cli MONITOR
 # Проверить логи RAG Worker
 tail -f rag_worker.log
+
+При тестировании импортов возникла ошибка версии numpy:
+A module that was compiled using NumPy 1.x cannot be run in NumPy 2.4.1
+Это не проблема импортов, а системная проблема совместимости пакетов. Для исправления:
+pip install "numpy<2" --upgrade matplotlib
+Или в вашем проекте:
+pip install "numpy==1.26.4" "matplotlib>=3.7.0"
