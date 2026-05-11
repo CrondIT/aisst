@@ -1,12 +1,14 @@
 """
 Модуль RAG-цепочки: GigaChat (LangChain) + ChromaDB.
 Версия 2: умное извлечение источника — статья/раздел/глава из текста чанка.
+Промпты загружаются из базы данных.
 """
 
 import gc
 import os
 import re
 import tracemalloc
+from typing import Optional
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -16,6 +18,7 @@ from langchain_core.language_models import BaseChatModel
 from rag_embeddings import get_giga_embeddings
 from global_state import GUEST_RAG_DIR
 from utils import logger
+from prompt_repository import PromptRepository
 
 
 # ── Мониторинг памяти ─────────────────────────────────────────────────────────
@@ -149,45 +152,67 @@ def _format_docs(docs: list) -> str:
     return "\n\n".join(parts)
 
 
-# ── Системный промпт ─────────────────────────────────────────────────────────
-_SYSTEM_PROMPT = (
-    "Ты — помощник студентов Саранского строительного техникума.\n"
-    "Отвечай только про техникумы, колледжи, "
-    "cреднее профессиональное образование.\n"
-    "Не включай в ответ информацию про высшее образование и про ВУЗы\n"
-    "Отвечай ТОЛЬКО на основе предоставленных фрагментов документов.\n"
-    "Внимательно изучи ВСЕ предоставленные фрагменты и объедини информацию.\n"
-    "Если в документах несколько фактов — приведи их все.\n"
-    "Если информация противоречит — укажи это.\n"
-    "Отвечай кратко: 5-12 предложений.\n"
-    "Не придумывай факты.\n"
-    "ВАЖНО: в конце ответа ОБЯЗАТЕЛЬНО укажи источники.\n"
-    "Формат: «Название документа», <Статья/Раздел>\n"
-    "Пример: «ФЗ от 5 апреля 2013 г N 44 ФЗ О контрактной системе», Статья 32\n"
-    "Копируй название документа ТОЧНО как указано в поле 'Документ:'.\n\n"
-    "Фрагменты документов:\n{context}"
-)
+# ── Кэш промпта RAG ──────────────────────────────────────────────────────────
+_rag_prompt: Optional[ChatPromptTemplate] = None
+_rag_prompt_loaded = False
 
-_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", _SYSTEM_PROMPT),
-    ("human", "{question}"),
-])
+
+async def _load_rag_prompt() -> ChatPromptTemplate:
+    """
+    Загружает RAG промпт из базы данных.
+    Кэширует результат для повторных вызовов.
+    """
+    global _rag_prompt, _rag_prompt_loaded
+
+    if _rag_prompt_loaded and _rag_prompt:
+        return _rag_prompt
+
+    prompt_template = await PromptRepository.get_prompt_template("rag_default")
+
+    if prompt_template:
+        _rag_prompt = prompt_template
+    else:
+        from db import DEFAULT_PROMPTS
+        rag_data = DEFAULT_PROMPTS.get("rag_default", {})
+        _rag_prompt = ChatPromptTemplate.from_messages([
+            ("system", rag_data.get("system", "")),
+            ("human", rag_data.get("human", "")),
+        ])
+
+    _rag_prompt_loaded = True
+    logger.info("RAG промпт загружен из БД")
+    return _rag_prompt
+
+
+def invalidate_rag_prompt_cache():
+    """Сбрасывает кэш RAG промпта."""
+    global _rag_prompt_loaded
+    _rag_prompt_loaded = False
+    logger.info("Кэш RAG промпта сброшен")
 
 
 # ── Синглтон для LCEL-цепочки ───────────────────────────────────────────────
 _rag_chain = None
 _rag_chain_llm = None
 _rag_chain_params = None
+_rag_chain_prompt_id = None
 
 
-def _get_rag_chain(lc_llm: BaseChatModel, top_k: int = 5, fetch_k: int = 20, lambda_mult: float = 0.9):
+def _get_rag_chain(
+    lc_llm: BaseChatModel,
+    rag_prompt: ChatPromptTemplate,
+    top_k: int = 5,
+    fetch_k: int = 20,
+    lambda_mult: float = 0.9,
+):
     """
     Возвращает синглтон LCEL-цепочки для RAG.
-    Пересоздаёт цепочку только если LLM или параметры изменились.
+    Пересоздаёт цепочку только если LLM, параметры или промпт изменились.
     """
-    global _rag_chain, _rag_chain_llm, _rag_chain_params
+    global _rag_chain, _rag_chain_llm, _rag_chain_params, _rag_chain_prompt_id
 
-    current_params = (id(lc_llm), top_k, fetch_k, lambda_mult)
+    prompt_id = id(rag_prompt)
+    current_params = (id(lc_llm), top_k, fetch_k, lambda_mult, prompt_id)
 
     if _rag_chain is None or _rag_chain_params != current_params:
         from load_from_file import check_vector_db
@@ -211,12 +236,13 @@ def _get_rag_chain(lc_llm: BaseChatModel, top_k: int = 5, fetch_k: int = 20, lam
                 "context": retriever | RunnableLambda(_format_docs),
                 "question": RunnablePassthrough(),
             }
-            | _PROMPT
+            | rag_prompt
             | lc_llm
             | StrOutputParser()
         )
         _rag_chain_llm = lc_llm
         _rag_chain_params = current_params
+        _rag_chain_prompt_id = prompt_id
 
     return _rag_chain
 
@@ -231,31 +257,20 @@ async def ask_rag(
     """
     Поиск ответа в ChromaDB + генерация через LangChain-совместимый LLM.
     Использует MMR (Maximum Marginal Relevance) для разнообразия источников.
-    LCEL-цепочка кэшируется в синглтоне.
-
-    Args:
-        user_text: Вопрос пользователя.
-        lc_llm:    LangChain-совместимая модель (app.state.giga_lc_client).
-        top_k:     Количество фрагментов в финальном результате (после MMR).
-        fetch_k:   Количество кандидатов для начального поиска (до MMR).
-        lambda_mult: Параметр MMR (0-1). Ближе к 1 = важнее релевантность,
-                     ближе к 0 — важнее разнообразие.
-
-    Returns:
-        Строка с ответом + указание источника.
+    Промпт загружается из базы данных.
     """
     try:
         _start_memory_tracking()
-        chain = _get_rag_chain(lc_llm, top_k, fetch_k, lambda_mult)
+
+        rag_prompt = await _load_rag_prompt()
+        chain = _get_rag_chain(lc_llm, rag_prompt, top_k, fetch_k, lambda_mult)
 
         answer: str = await chain.ainvoke(user_text)
         logger.info(f"RAG ответ: {len(answer)} символов")
 
-        # Очистка памяти после каждого запроса
         gc.collect()
         _log_memory_usage("RAG: ")
 
-        # Если ответ содержит "не найден" — предупреждаем
         if "не найден" in answer.lower():
             logger.warning(
                 f"RAG: модель не нашла информацию. Запрос: '{user_text}'"

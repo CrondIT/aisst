@@ -7,6 +7,8 @@ from sqlalchemy import (
     DateTime,
     Boolean,
     func,
+    Text,
+    ForeignKey,
 )
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
@@ -17,10 +19,9 @@ from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
     mapped_column,
-    relationship,  # добавить
+    relationship,
 )
-from sqlalchemy import ForeignKey 
-from global_state import MAX_DB_PATH
+from global_state import MAX_DB_PATH, PROMPT_VERSIONS_LIMIT
 
 
 # Инициализация асинхронной базы данных
@@ -76,6 +77,41 @@ class Billing(Base):
     balance: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str] = mapped_column(String(150), default="")
     user: Mapped["User"] = relationship(back_populates="billings")
+
+
+class Prompt(Base):
+    """Таблица промптов для цепочек бота."""
+    __tablename__ = "prompts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    prompt_key: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    description: Mapped[str] = mapped_column(String(500), default="")
+    current_system_text: Mapped[str] = mapped_column(Text, default="")
+    current_human_text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+    updated_by: Mapped[int] = mapped_column(BigInteger, default=0)
+    versions: Mapped[list["PromptVersion"]] = relationship(
+        back_populates="prompt", cascade="all, delete-orphan"
+    )
+
+
+class PromptVersion(Base):
+    """История версий промптов."""
+    __tablename__ = "prompt_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    prompt_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("prompts.id", ondelete="CASCADE"), index=True
+    )
+    version_number: Mapped[int] = mapped_column(Integer, default=1)
+    system_text: Mapped[str] = mapped_column(Text, default="")
+    human_text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_by: Mapped[int] = mapped_column(BigInteger, default=0)
+    prompt: Mapped["Prompt"] = relationship(back_populates="versions")
 
 
 async def create_database():
@@ -314,3 +350,123 @@ async def get_billing_history(
     except Exception as e:
         logger.error(f"Ошибка при получении истории billings: {e}")
         return None
+
+
+# ─── Промпты для цепочек ───
+DEFAULT_PROMPTS = {
+    "mentor_question": {
+        "description": "Промпт для генерации вопросов в режиме ментора",
+        "system": """Ты — строгий преподаватель колледжа, который проверяет знания студента.
+
+Контекст из документов колледжа:
+{context}
+
+Задание:
+1. На основе КОНТЕКСТА сформулируй ОДИН проверочный вопрос.
+2. Вопрос должен проверять понимание ключевого материала.
+3. Вопрос должен иметь КОНКРЕТНЫЙ ответ (факт, определение, число, название).
+4. Не задавай вопросы типа "объясните", "опишите" — только фактические вопросы.
+5. НЕ добавляй префикс "Вопрос:" — просто напиши сам вопрос.
+
+Формат ответа: ТОЛЬКО сам вопрос, без лишних слов.""",
+        "human": "Сформулируй проверочный вопрос по теме: {topic}",
+    },
+    "mentor_evaluation": {
+        "description": "Промпт для оценки ответов студента в режиме ментора",
+        "system": """Ты — строгий преподаватель, который проверяет знания студента.
+
+Материал из документов (эталон):
+{context}
+
+Вопрос, на который отвечал студент:
+{question}
+
+Ответ студента:
+{answer}
+
+ВНИМАНИЕ: Будь КРАЙНЕ строг при оценке. Оценивай буквально.
+
+"ПРАВИЛЬНО" — только если:
+- Ответ ТОЧНО совпадает с эталоном
+- Числа, названия, буквенные коды идентичны эталону
+- Нет ни одной ошибки
+
+"ЧАСТИЧНО" — если:
+- Ответ содержит верную идею, но неполон
+- Упущены важные детали эталонного ответа
+
+"НЕПРАВИЛЬНО" — если:
+- Названия отличаются хотя бы одним символом/буквой
+- Числа не совпадают
+- Упомянуты неверные данные (не те авторы, не тот год, не тот формат)
+- Ответ не раскрывает суть вопроса
+
+Формат (ТОЛЬКО эти две строки):
+ОЦЕНКА: ПРАВИЛЬНО или ЧАСТИЧНО или НЕПРАВИЛЬНО
+ОБРАТНАЯ СВЯЗЬ: Одно предложение
+ПРАВИЛЬНЫЙ ОТВЕТ: эталонный ответ из контекста (если есть)""",
+        "human": "",
+    },
+    "rag_default": {
+        "description": "Основной RAG промпт для ответов на вопросы по документам",
+        "system": """Ты — помощник студентов Саранского строительного техникума.
+Отвечай только про техникумы, колледжи, cреднее профессиональное образование.
+Не включай в ответ информацию про высшее образование и про ВУЗы
+Отвечай ТОЛЬКО на основе предоставленных фрагментов документов.
+Внимательно изучи ВСЕ предоставленные фрагменты и объедини информацию.
+Если в документах несколько фактов — приведи их все.
+Если информация противоречит — укажи это.
+Отвечай кратко: 5-12 предложений.
+Не придумывай факты.
+ВАЖНО: в конце ответа ОБЯЗАТЕЛЬНО укажи источники.
+Формат: «Название документа», <Статья/Раздел>
+Пример: «ФЗ от 5 апреля 2013 г N 44 ФЗ О контрактной системе», Статья 32
+Копируй название документа ТОЧНО как указано в поле 'Документ:'.
+
+Фрагменты документов:
+{context}""",
+        "human": "{question}",
+    },
+}
+
+
+async def init_default_prompts():
+    """
+    Инициализирует промпты по умолчанию в базе данных.
+    Создаёт записи если их нет, иначе пропускает.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            from sqlalchemy import select
+
+            for prompt_key, data in DEFAULT_PROMPTS.items():
+                result = await db.execute(
+                    select(Prompt).where(Prompt.prompt_key == prompt_key)
+                )
+                existing = result.scalar_one_or_none()
+
+                if not existing:
+                    prompt = Prompt(
+                        prompt_key=prompt_key,
+                        description=data["description"],
+                        current_system_text=data["system"],
+                        current_human_text=data["human"],
+                    )
+                    db.add(prompt)
+
+                    await db.flush()
+
+                    version = PromptVersion(
+                        prompt_id=prompt.id,
+                        version_number=1,
+                        system_text=data["system"],
+                        human_text=data["human"],
+                        created_by=0,
+                    )
+                    db.add(version)
+
+                    logger.info(f"Инициализирован промпт: {prompt_key}")
+
+            await db.commit()
+    except Exception as e:
+        logger.error(f"Ошибка при инициализации промптов: {e}")

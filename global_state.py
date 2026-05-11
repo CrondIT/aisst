@@ -110,6 +110,12 @@ TRUSTED_WEBHOOK_IPS = [
 # Rate limiting: макс. запросов на пользователя в минуту
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "30"))
 
+# ─── Версионирование промптов ───
+# Максимальное количество хранимых версий для каждого промпта
+PROMPT_VERSIONS_LIMIT = int(os.getenv("PROMPT_VERSIONS_LIMIT", "10"))
+# Количество версий для быстрого отката (хранится больше чем показывается)
+PROMPT_VERSIONS_KEEP = int(os.getenv("PROMPT_VERSIONS_KEEP", "15"))
+
 # ─── Прокси ───
 PROXY_IP = os.getenv("PROXY_IP", "")
 PROXY_PORT = int(os.getenv("PROXY_PORT", "1080"))
@@ -660,4 +666,45 @@ def clear_mentor_state(user_id: int):
     else:
         global user_mentor_state
         user_mentor_state.pop(user_id, None)
+
+
+# ==================== Prompt Edit State ====================
+
+def get_prompt_edit_state(user_id: int) -> dict | None:
+    """
+    Получает состояние редактирования промпта для пользователя.
+    """
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            return q.get_user_state(user_id, "prompt_edit")
+    return _prompt_edit_states.get(user_id)
+
+
+def set_prompt_edit_state(user_id: int, state: dict):
+    """Сохраняет состояние редактирования промпта для пользователя"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.set_user_state(user_id, "prompt_edit", state)
+            return
+    global _prompt_edit_states
+    _prompt_edit_states[user_id] = state
+
+
+def clear_prompt_edit_state(user_id: int):
+    """Очищает состояние редактирования промпта"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.delete_user_state(user_id, "prompt_edit")
+            return
+    global _prompt_edit_states
+    _prompt_edit_states.pop(user_id, None)
+
+
+if os.getenv("USE_REDIS", "false").lower() != "true":
+    _prompt_edit_states: dict = {}
+else:
+    _prompt_edit_states = {}
 

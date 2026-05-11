@@ -212,3 +212,13 @@ A module that was compiled using NumPy 1.x cannot be run in NumPy 2.4.1
 pip install "numpy<2" --upgrade matplotlib
 Или в вашем проекте:
 pip install "numpy==1.26.4" "matplotlib>=3.7.0"
+
+Команды режима /edit:
+список          — показать все промпты
+промпт: X       — выбрать промпт
+система:        — редактировать system prompt
+человек:        — редактировать human prompt
+сохранить       — сохранить изменения
+версии          — показать историю версий
+откат: N        — откатить к версии N
+отмена          — отменить изменения

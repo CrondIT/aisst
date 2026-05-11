@@ -2,6 +2,7 @@
 Модуль RAG-цепочки для режима Mentor (проверка знаний).
 Включает цепочки для генерации вопросов и оценки ответов студентов.
 Поддерживает фильтрацию по конкретному документу через параметр document_name.
+Промпты загружаются из базы данных.
 """
 
 import gc
@@ -17,61 +18,76 @@ from langchain_core.language_models import BaseChatModel
 from rag_embeddings import get_giga_embeddings
 from global_state import GUEST_RAG_DIR
 from utils import logger
+from prompt_repository import PromptRepository
 
 
-# ── Промпт для генерации вопроса ─────────────────────────────────────────────
-_QUESTION_SYSTEM_PROMPT = """Ты — строгий преподаватель колледжа, который проверяет знания студента.
+# ── Кэш промптов (обновляется при изменении) ──────────────────────────────────
+_question_prompt: Optional[ChatPromptTemplate] = None
+_evaluation_prompt: Optional[ChatPromptTemplate] = None
+_prompts_loaded = False
 
-Контекст из документов колледжа:
+
+async def _load_mentor_prompts() -> tuple[ChatPromptTemplate, ChatPromptTemplate]:
+    """
+    Загружает промпты ментора из базы данных.
+    Кэширует результат для повторных вызовов.
+    """
+    global _question_prompt, _evaluation_prompt, _prompts_loaded
+
+    if _prompts_loaded and _question_prompt and _evaluation_prompt:
+        return _question_prompt, _evaluation_prompt
+
+    question_template = await PromptRepository.get_prompt_template("mentor_question")
+
+    if question_template:
+        _question_prompt = question_template
+    else:
+        from db import DEFAULT_PROMPTS
+        question_data = DEFAULT_PROMPTS.get("mentor_question", {})
+        _question_prompt = ChatPromptTemplate.from_messages([
+            ("system", question_data.get("system", "")),
+            ("human", question_data.get("human", "")),
+        ])
+
+    # Всегда используем строгий хардкодированный промпт для оценки
+    # Это гарантирует корректную работу независимо от содержимого БД
+    _evaluation_prompt = _EVALUATION_PROMPT
+
+    _prompts_loaded = True
+    logger.info("Mentor промпты загружены (вопрос из БД, оценка - строгий хардкод)")
+    return _question_prompt, _evaluation_prompt
+
+
+def invalidate_prompt_cache():
+    """Сбрасывает кэш промптов. Вызывать после обновления промпта."""
+    global _prompts_loaded, _question_prompt, _evaluation_prompt
+    _prompts_loaded = False
+    _question_prompt = None
+    _evaluation_prompt = None
+    logger.info("Кэш промптов сброшен")
+
+
+# ── Промпт для оценки ответа студента (МАКСИМАЛЬНО СТРОГИЙ) ────────────────────
+_EVALUATION_SYSTEM_PROMPT = """Ты — автоматическая система проверки знаний. НЕ будь вежливым. Оценивай строго.
+
+КОНТЕКСТ:
 {context}
 
-Задание:
-1. На основе КОНТЕКСТА сформулируй ОДИН проверочный вопрос.
-2. Вопрос должен проверять понимание ключевого материала.
-3. Вопрос должен иметь КОНКРЕТНЫЙ ответ (факт, определение, число, название).
-4. Не задавай вопросы типа "объясните", "опишите" — только фактические вопросы.
-5. НЕ добавляй префикс "Вопрос:" — просто напиши сам вопрос.
+ВОПРОС: {question}
 
-Формат ответа: ТОЛЬКО сам вопрос, без лишних слов."""
+ОТВЕТ СТУДЕНТА: {answer}
 
-_QUESTION_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", _QUESTION_SYSTEM_PROMPT),
-    ("human", "Сформулируй проверочный вопрос по теме: {topic}"),
-])
+Проверь ответ по КОНТЕКСТУ. Ответ должен содержать ФАКТЫ из контекста.
 
+Примеры НЕПРАВИЛЬНО:
+- Вопрос про газы → ответ "сварные трубы" = НЕПРАВИЛЬНО (нет газов в ответе)
+- Вопрос про положение шва → ответ "матрешка упала" = НЕПРАВИЛЬНО (бессмыслица)
+- Любой ответ без фактов из контекста = НЕПРАВИЛЬНО
 
-# ── Промпт для оценки ответа студента ─────────────────────────────────────────
-_EVALUATION_SYSTEM_PROMPT = """Ты — строгий преподаватель, который проверяет знания студента.
-
-Материал из документов (эталон):
-{context}
-
-Вопрос, на который отвечал студент:
-{question}
-
-Ответ студента:
-{answer}
-
-ВНИМАНИЕ: Будь КРАЙНЕ строг при оценке. Оценивай буквально.
-
-"ПРАВИЛЬНО" — только если:
-- Ответ ТОЧНО совпадает с эталоном
-- Числа, названия, буквенные коды идентичны эталону
-- Нет ни одной ошибки
-
-"ЧАСТИЧНО" — если:
-- Ответ содержит верную идею, но неполон
-- Упущены важные детали эталонного ответа
-
-"НЕПРАВИЛЬНО" — если:
-- Названия отличаются хотя бы одним символом/буквой
-- Числа не совпадают
-- Упомянуты неверные данные (не те авторы, не тот год, не тот формат)
-- Ответ не раскрывает суть вопроса
-
-Формат (ТОЛЬКО эти две строки):
-ОЦЕНКА: ПРАВИЛЬНО или ЧАСТИЧНО или НЕПРАВИЛЬНО
-ОБРАТНАЯ СВЯЗЬ: Одно предложение"""
+ВЫХОДНЫЕ ДАННЫЕ (строго 3 строки, без объяснений):
+ОЦЕНКА: ПРАВИЛЬНО | ЧАСТИЧНО | НЕПРАВИЛЬНО
+ОБРАТНАЯ СВЯЗЬ: краткое пояснение
+ПРАВИЛЬНЫЙ ОТВЕТ: конкретный ответ из контекста"""
 
 _EVALUATION_PROMPT = ChatPromptTemplate.from_messages([
     ("system", _EVALUATION_SYSTEM_PROMPT),
@@ -161,51 +177,48 @@ def _search_documents(
         return []
 
 
-def _get_question_chain(lc_llm: BaseChatModel):
+def _get_question_chain(lc_llm: BaseChatModel, question_prompt: ChatPromptTemplate):
     """
     Возвращает синглтон цепочки генерации вопроса.
-    Пересоздаёт цепочку если lc_llm изменился.
     """
     global _question_chain, _question_chain_llm
-    
-    # Пересоздаём если lc_llm изменился
+
     if _question_chain is None or _question_chain_llm is not id(lc_llm):
         _question_chain = (
             {
                 "context": RunnablePassthrough(),
                 "topic": RunnablePassthrough(),
             }
-            | _QUESTION_PROMPT
+            | question_prompt
             | lc_llm
             | StrOutputParser()
         )
         _question_chain_llm = id(lc_llm)
         logger.info(f"Mentor: создана новая цепочка вопросов (lc_llm id={id(lc_llm)})")
-    
+
     return _question_chain
 
 
-def _get_evaluation_chain(lc_llm: BaseChatModel):
+def _get_evaluation_chain(lc_llm: BaseChatModel, evaluation_prompt: ChatPromptTemplate):
     """
     Возвращает синглтон цепочки оценки ответа.
-    Пересоздаёт цепочку если lc_llm изменился.
     """
     global _evaluation_chain, _evaluation_chain_llm
-    
-    if _evaluation_chain is None or _evaluation_chain_llm is not id(lc_llm):
+
+    if _evaluation_chain is None or _evaluation_chain_llm is not id(lc_llm) or _evaluation_chain_llm is None:
         _evaluation_chain = (
             {
                 "context": RunnablePassthrough(),
                 "question": RunnablePassthrough(),
                 "answer": RunnablePassthrough(),
             }
-            | _EVALUATION_PROMPT
+            | evaluation_prompt
             | lc_llm
             | StrOutputParser()
         )
         _evaluation_chain_llm = id(lc_llm)
         logger.info(f"Mentor: создана новая цепочка оценки (lc_llm id={id(lc_llm)})")
-    
+
     return _evaluation_chain
 
 
@@ -220,33 +233,18 @@ async def generate_question(
 ) -> dict:
     """
     Генерирует проверочный вопрос по заданной теме.
-    
-    Args:
-        topic: Тема для проверки
-        lc_llm: LangChain-совместимая модель
-        user_id: ID пользователя (для логирования)
-        document_name: Имя конкретного документа для поиска (опционально)
-        question_number: Номер вопроса (для разнообразия через seed)
-    
-    Returns:
-        dict с ключами:
-        - success: bool
-        - question: str - сгенерированный вопрос
-        - context: str - контекст из документов
-        - error: str - сообщение об ошибке (если есть)
     """
     try:
-        # Используем time + user_id как seed для случайности при первом вопросе
         current_time = int(time.time() * 1000) % 1000000
         seed = (current_time + user_id) % 1000000
-        
+
         docs = _search_documents(
             query=topic,
             document_name=document_name,
             k=3,
             seed=seed,
         )
-        
+
         if not docs:
             return {
                 "success": False,
@@ -255,33 +253,32 @@ async def generate_question(
                 "error": f"Не найдены документы по теме '{topic}'"
                 + (f" в документе '{document_name}'" if document_name else ""),
             }
-        
+
         context = _format_context(docs)
-        
-        # Теперь генерируем вопрос с полученным контекстом
-        chain = _get_question_chain(lc_llm)
+
+        question_prompt, _ = await _load_mentor_prompts()
+        chain = _get_question_chain(lc_llm, question_prompt)
         result: str = await chain.ainvoke({
             "topic": topic,
             "context": context,
         })
-        
-        # Обработка результата - сохраняем как есть
+
         question = result.strip()
-        
+
         logger.info(
             f"Mentor: сгенерирован вопрос для user={user_id}, "
             f"тема='{topic}', документ='{document_name}', "
             f"вопрос_номер={question_number}, фрагментов={len(docs)}"
         )
-        
+
         gc.collect()
-        
+
         return {
             "success": True,
             "question": question,
             "context": context,
         }
-        
+
     except Exception as e:
         logger.error(f"Mentor: ошибка генерации вопроса: {e}", exc_info=True)
         return {
@@ -301,50 +298,68 @@ async def evaluate_answer(
 ) -> dict:
     """
     Оценивает ответ студента на вопрос.
-    
-    Args:
-        question: Вопрос ментора
-        student_answer: Ответ студента
-        context: Контекст из документов (уже подготовленный)
-        lc_llm: LangChain-совместимая модель
-        user_id: ID пользователя (для логирования)
-    
-    Returns:
-        dict с ключами:
-        - success: bool
-        - evaluation: str - "ПРАВИЛЬНО" / "ЧАСТИЧНО" / "НЕПРАВИЛЬНО"
-        - feedback: str - обратная связь
-        - error: str - сообщение об ошибке (если есть)
     """
-    # Список фраз, которые НЕ являются ответом
     not_an_answer = (
         "не знаю", "незнаю", "не понимаю", "затрудняюсь",
         "не могу ответить", "без понятия", "хз", "не в курсе",
         "unknown", "dont know", "don't know", "no idea", "idk"
     )
-    
+
     answer_lower = student_answer.lower().strip()
-    if answer_lower in not_an_answer or len(answer_lower) < 3:
+    
+    # Проверка на бессмысленные ответы
+    nonsense_patterns = (
+        "не знаю", "хз", "затрудняюсь", "без понятия",
+        "абырвалг", "тентакль", "пвапвап", "фывап", "йцукен",
+        "asdf", "qwer", "zxcv", "йцук", "мсмит", "test", "testtest",
+        "биполярка", "просто", "надоела", "матрешка", "упала",
+        "ерунда", "чушь", "фигня", "ерундовый", "ерундовые",
+    )
+    
+    # Проверка на случайный набор символов
+    random_chars = set("йцукенгшщзхъфывапролджэёasdfghjklzxcvbnm")
+    unique_chars_in_answer = set(c for c in answer_lower if c in random_chars or c == " ")
+    is_random = len(unique_chars_in_answer) <= 3 and len(answer_lower) > 5
+    
+    is_nonsense = (
+        len(answer_lower) < 5 or
+        answer_lower in not_an_answer or
+        answer_lower in nonsense_patterns or
+        is_random or
+        any(word in answer_lower for word in nonsense_patterns if len(word) > 4)
+    )
+    
+    if is_nonsense:
+        logger.info(f"Mentor: ответ признан бессмысленным: '{student_answer}'")
         return {
             "success": True,
             "evaluation": "НЕПРАВИЛЬНО",
-            "feedback": "К сожалению, это неправильный ответ. Попробуйте изучить материал ещё раз.",
+            "feedback": "Это не ответ на вопрос. Попробуйте изучить материал ещё раз.",
         }
-    
+
+    # Принудительно сбрасываем кэш цепочки каждый раз
+    global _evaluation_chain, _evaluation_chain_llm
+    _evaluation_chain = None
+    _evaluation_chain_llm = None
+
     try:
-        chain = _get_evaluation_chain(lc_llm)
-        
+        _, evaluation_prompt = await _load_mentor_prompts()
+        chain = _get_evaluation_chain(lc_llm, evaluation_prompt)
+
+        logger.info(f"Mentor: отправка на оценку - вопрос='{question[:50]}...', ответ='{student_answer[:50]}...'")
+
         result: str = await chain.ainvoke({
             "question": question,
             "answer": student_answer,
             "context": context,
         })
-        
-        # Парсим результат
+
+        logger.info(f"Mentor: результат оценки: {result[:200] if result else 'empty'}...")
+
         evaluation = "НЕПРАВИЛЬНО"
-        feedback = result
-        
-        # Ищем ОЦЕНКА и ОБРАТНАЯ СВЯЗЬ в тексте
+        feedback = "Ответ неверный."
+        correct_answer = None
+
         for line in result.split("\n"):
             line_upper = line.upper()
             if "ОЦЕНКА" in line_upper and ":" in line:
@@ -358,33 +373,52 @@ async def evaluate_answer(
             elif "ОБРАТНАЯ СВЯЗЬ" in line_upper or "ОБРАТНАЯ" in line_upper:
                 if ":" in line:
                     feedback = line.split(":", 1)[1].strip()
-                break
-        
+            elif "ПРАВИЛЬНЫЙ ОТВЕТ" in line_upper or "ЭТАЛОННЫЙ ОТВЕТ" in line_upper:
+                if ":" in line:
+                    correct_answer = line.split(":", 1)[1].strip()
+
+# Если модель сказала "ПРАВИЛЬНО" - дополнительно проверим
+        # что ответ хоть как-то связан с контекстом
         if evaluation == "ПРАВИЛЬНО":
-            feedback = "Верно! Ответ правильный."
+            # Ищем слова из ответа в контексте
+            context_lower = context.lower()
+            answer_words = [w for w in answer_lower.split() if len(w) > 3]
+            matches = sum(1 for w in answer_words if w in context_lower)
+            
+            if matches < 1:
+                logger.info(f"Mentor: переопределяю ПРАВИЛЬНО -> НЕПРАВИЛЬНО (мало совпадений с контекстом)")
+                evaluation = "НЕПРАВИЛЬНО"
+                feedback = "Ответ не соответствует материалам учебника."
+            else:
+                feedback = "Верно! Ответ правильный."
         elif evaluation == "ЧАСТИЧНО":
-            # Для частично правильных — показываем краткую версию без "Ответ студента..."
             sentences = feedback.split(".")
             if len(sentences) > 0:
-                # Берём первое предложение с объяснением
                 clean_feedback = sentences[0].strip()
                 if len(clean_feedback) > 5:
                     feedback = clean_feedback + "."
                 else:
                     feedback = "Ответ частично правильный, но требует уточнения."
-        
+        else:
+            pass
+
         logger.info(
-            f"Mentor: оценен ответ user={user_id}: {evaluation}"
+            f"Mentor: оценен ответ user={user_id}: {evaluation} (ответ='{student_answer[:30]}...')"
         )
-        
+
         gc.collect()
-        
-        return {
+
+        result_dict = {
             "success": True,
             "evaluation": evaluation,
             "feedback": feedback,
         }
         
+        if correct_answer:
+            result_dict["correct_answer"] = correct_answer
+
+        return result_dict
+
     except Exception as e:
         logger.error(f"Mentor: ошибка оценки ответа: {e}", exc_info=True)
         return {

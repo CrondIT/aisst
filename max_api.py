@@ -112,6 +112,8 @@ BUTTONS = [
     {"text": "Чат с ИИ", "command": "/gigachatpro"},
     {"text": "Настройки агента", "command": "/rag"},
     {"text": "Оплата", "command": "/billing"},
+    {"text": "Промпты", "command": "/edit"},
+    {"text": "Тесты", "command": "/mentor"},
 ]
 
 

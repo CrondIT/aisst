@@ -46,6 +46,11 @@ async def lifespan(app: FastAPI):
     await db.create_database()
     logger.info("Database initialized")
 
+    # ─── Инициализация промптов по умолчанию ───
+    logger.info("Initializing default prompts...")
+    await db.init_default_prompts()
+    logger.info("Default prompts initialized")
+
     logger.info(f"Startup: WEBHOOK_URL={WEBHOOK_URL!r}")
 
     # ----------- Инициализация ИИ моделей -----------
