@@ -9,9 +9,11 @@ from global_state import (
     GIGACHAT_SCOPE,
     ADMIN_API_TOKEN,
     RUS_TRUSTED_ROOT_CA_PEM,
+    OPENAI_API_KEY_CHAT,
+    GEMINI_API_KEY,
 )
 from gigachat.client import GigaChat
-from ai_models import GigaChatClient
+from ai_models import GigaChatClient, OpenAIClient, GeminiClient
 from langchain_gigachat import GigaChat as LangChainGigaChat
 
 import max_api
@@ -81,6 +83,20 @@ async def lifespan(app: FastAPI):
 
         logger.info("GigaChat клиенты инициализированы (native + langchain)")
 
+    # ─── OpenAI ───
+    if not OPENAI_API_KEY_CHAT:
+        logger.warning("OPENAI_API_KEY не задан. Режим ChatGPT недоступен.")
+    else:
+        app.state.openai_client = OpenAIClient(OPENAI_API_KEY_CHAT)
+        logger.info("OpenAI клиент инициализирован")
+
+    # ─── Gemini ───
+    if not GEMINI_API_KEY:
+        logger.warning("GEMINI_API_KEY не задан. Режим Gemini недоступен.")
+    else:
+        app.state.gemini_client = GeminiClient(GEMINI_API_KEY)
+        logger.info("Gemini клиент инициализирован")
+
     # Startup
     if WEBHOOK_URL:
         await max_api.subscribe_webhook()
@@ -99,3 +115,9 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down, closing giga_client...")
     if giga_client is not None:
         giga_client.close()
+
+    if hasattr(app.state, 'openai_client'):
+        logger.info("Shutting down, closing openai_client...")
+        await app.state.openai_client.close()
+
+    logger.info("Shutdown complete")

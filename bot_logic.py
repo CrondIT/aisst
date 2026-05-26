@@ -46,6 +46,14 @@ mode_map = {
         "gigachatpro",
         "Режим: GigaChat Pro"
     ),
+    "/chatgpt": (
+        "chatgpt",
+        "Режим: ChatGPT"
+    ),
+    "/gemini": (
+        "gemini",
+        "Режим: Gemini"
+    ),
     "/mentor": (
         "mentor",
         "Режим: Проверка знаний студентов""\n"
@@ -162,7 +170,9 @@ async def handle_message(
                     extracted_text = file_data["extracted_text"]
                 # получаем полный промпт с текстом файла  историей
                 # и контролем токенов
-                user_prompt = await full_prompt(user_id, user_text, extracted_text)
+                user_prompt = await full_prompt(
+                    user_id, user_text, extracted_text
+                )
                 #
                 answer = await request.app.state.giga_client.chat(
                     messages=user_prompt,
@@ -186,6 +196,28 @@ async def handle_message(
                     return "Вот Ваш файл в формате RTF"
 
                 return answer
+            case "chatgpt":
+                if not hasattr(request.app.state, "openai_client"):
+                    return "OpenAI клиент не настроен. Проверьте OPENAI_API_KEY в .env"
+                client = request.app.state.openai_client
+                user_prompt = [{"role": "user", "content": user_text}]
+                answer = await client.chat(
+                    messages=user_prompt,
+                    model="gpt-5.2-chat-latest",
+                )
+                await db.add_billing(user_id, user_mode, user_text, 0, 5)
+                return answer
+            case "gemini":
+                if not hasattr(request.app.state, "gemini_client"):
+                    return "Gemini клиент не настроен. Проверьте GEMINI_API_KEY в .env"
+                client = request.app.state.gemini_client
+                user_prompt = [{"role": "user", "content": user_text}]
+                answer = await client.chat(
+                    messages=user_prompt,
+                    model="gemini-2.5-pro",
+                )
+                await db.add_billing(user_id, user_mode, user_text, 0, 5)
+                return answer
             case "mentor":
                 return await handle_mentor_mode(
                     request, user_text, user_id, user_mode
@@ -207,7 +239,9 @@ async def handle_message(
                     if user_text.lower() in confirmations:
                         file_to_del = get_user_pending_delete(user_id)
                         clear_user_pending_delete(user_id)
-                        await db.add_billing(user_id, user_mode, user_text, 0, 1)
+                        await db.add_billing(
+                            user_id, user_mode, user_text, 0, 1
+                        )
                         return await asyncio.to_thread(
                             delete_file_from_vector_db, file_to_del
                         )
@@ -224,7 +258,9 @@ async def handle_message(
                 # если пользователь что то набрал,
                 # что бы он ни набрал считаем что это часть имени файла
                 # из векторной базы и пытаемся найти файл
-                result = get_all_filenames_from_vector_db(search_text=user_text)
+                result = get_all_filenames_from_vector_db(
+                    search_text=user_text
+                )
                 if result and not result.startswith("Файл с таким"):
                     # Файл найден, запрашиваем подтверждение
                     set_user_pending_delete(user_id, result)
