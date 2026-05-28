@@ -1467,7 +1467,6 @@ async def send_pdf_response(user_id: int, reply: str):
             user_id=user_id,
             file_data=pdf_bytes,
             filename="document.pdf",
-            caption="Ваш ответ в формате PDF",
             file_type="file"
         )
         

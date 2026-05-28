@@ -1567,7 +1567,6 @@ async def send_docx_response(
             user_id=user_id,
             file_data=doc_bytes,
             filename="document.docx",
-            caption="Ваш ответ в формате Word",
             file_type="file"
         )
         

@@ -47,11 +47,9 @@ class OpenAIClient:
             f"temperature={temperature}, max_tokens={max_tokens}"
         )
         try:
-            # gpt-5.x работает только через responses API (не chat.completions).
-            # Паттерн взят из models_config.py → client.responses.create().
-            # Параметры temperature и max_output_tokens не передаём —
-            # в рабочем примере models_config.py они отсутствуют,
-            # и их передача вызывает 400 Bad Request.
+            # gpt-5.x работает только через responses API 
+            # (не chat.completions).
+            # Параметры temperature и max_output_tokens не передаём
             response = await self._client.responses.create(
                 model=model_name,
                 input=messages,
@@ -85,7 +83,8 @@ class GeminiClient:
 
         # google-genai SDK не поддерживает поле proxy в HttpOptions.
         # Используем временную установку env-переменных: httpx читает
-        # ALL_PROXY / HTTPS_PROXY в своём __init__ (trust_env=True по умолчанию)
+        # ALL_PROXY / HTTPS_PROXY в своём __init__ 
+        # (trust_env=True по умолчанию)
         # — то есть в момент создания genai.Client, а не каждого запроса.
         # После создания клиента окружение восстанавливается, чтобы прокси
         # не подхватили GigaChat, MAX API и другие http-клиенты процесса.
@@ -99,7 +98,8 @@ class GeminiClient:
 
         self._client = genai.Client(api_key=api_key)
 
-        # Восстанавливаем окружение — прокси уже захвачен httpx-клиентом внутри genai
+        # Восстанавливаем окружение — 
+        # прокси уже захвачен httpx-клиентом внутри genai
         if proxy_url:
             for key, prev in _saved.items():
                 if prev is None:

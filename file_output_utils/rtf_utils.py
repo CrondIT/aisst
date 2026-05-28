@@ -112,7 +112,6 @@ async def send_rtf_response(user_id: int, reply: str):
             user_id=user_id,
             file_data=file_data,
             filename="document.rtf",
-            caption="Файл с ответом модели (RTF)",
             file_type="file"
         )
         

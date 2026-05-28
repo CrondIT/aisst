@@ -30,14 +30,24 @@ async def full_prompt(
     wants_excel_format = xlsx_utils.check_user_wants_xlsx_format(user_message)
     wants_rtf_format = rtf_utils.check_user_wants_rtf_format(user_message)
 
+    # Сохраняем оригинальный вопрос пользователя до вставки схемы
+    original_user_message = user_message
+
+    # Определяем схему запрошенного формата
+    format_schema: str | None = None
     if wants_word_format:
-        user_message = user_message + " " + docx_utils.JSON_SCHEMA
+        format_schema = docx_utils.JSON_SCHEMA
     elif wants_pdf_format:
-        user_message = user_message + " " + pdf_utils.JSON_SCHEMA_PDF
+        format_schema = pdf_utils.JSON_SCHEMA_PDF
     elif wants_excel_format:
-        user_message = user_message + " " + xlsx_utils.JSON_SCHEMA_EXCEL
+        format_schema = xlsx_utils.JSON_SCHEMA_EXCEL
     elif wants_rtf_format:
-        user_message = user_message + " " + RTF_PROMPT
+        format_schema = RTF_PROMPT
+
+    # Для ветки "с файлом" схема по-прежнему добавляется в текст пользователя
+    # (там контекст файла формирует augmented_question)
+    if format_schema:
+        user_message = user_message + " " + format_schema
 
     user_mode = get_user_mode(user_id)
     model_name = MODELS.get(user_mode)
@@ -171,7 +181,24 @@ async def full_prompt(
         ]
         return full_context
     else:
-        # Без файла - просто возвращаем вопрос пользователя
+        # Без файла
+        if format_schema:
+            # Схема идёт в system-сообщение — LLM обязана вернуть JSON.
+            # Вопрос пользователя передаётся чистым, без схемы, чтобы модель
+            # не путала контент вопроса с инструкцией по формату вывода.
+            return [
+                {
+                    "role": "system",
+                    "content": (
+                        "Ответь на вопрос пользователя, оформив ответ СТРОГО "
+                        "в виде валидного JSON согласно следующей схеме. "
+                        "Выводи ТОЛЬКО JSON без пояснений, markdown и кавычек:\n\n"
+                        + format_schema
+                    ),
+                },
+                {"role": "user", "content": original_user_message},
+            ]
+        # Просто возвращаем вопрос пользователя
         return [
             {"role": "user", "content": user_message}
         ]

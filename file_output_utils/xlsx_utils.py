@@ -459,7 +459,6 @@ async def send_xlsx_response(user_id: int, reply: str):
             user_id=user_id,
             file_data=xlsx_bytes,
             filename="document.xlsx",
-            caption="Ваш ответ в формате Excel",
             file_type="file"
         )
         

@@ -41,10 +41,13 @@ async def _process_audio_and_respond(
             )
             return
 
+        # Сначала показываем пользователю текст распознанного сообщения,
+        # потом обрабатываем и отправляем ответ
+        await max_api.send_message(user_id, recognized_text)
+
         reply_text = await bot_logic.handle_message(
             request, recognized_text, sender
         )
-        await max_api.send_message(user_id, recognized_text)
         if not reply_text:
             logger.error(f"Пустой ответ для пользователя: {user_id}")
             await max_api.send_message(
