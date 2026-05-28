@@ -164,60 +164,69 @@ async def handle_message(
                 
             case "gigachatpro":
                 # проверяем есть ли файл для (анализа) включения в контекст
-                extracted_text = ""
-                file_data = get_user_file_data(user_id)
-                if file_data and "extracted_text" in file_data:
-                    extracted_text = file_data["extracted_text"]
-                # получаем полный промпт с текстом файла  историей
+                extracted_text = _get_file_extracted_text(user_id)
+                # получаем полный промпт с текстом файла, историей
                 # и контролем токенов
                 user_prompt = await full_prompt(
                     user_id, user_text, extracted_text
                 )
-                #
                 answer = await request.app.state.giga_client.chat(
                     messages=user_prompt,
                     model="GigaChat",
                 )
                 await db.add_billing(user_id, user_mode, user_text, 0, 5)
-
-                # Если пользователь запросил конкретный формат 
+                # Если пользователь запросил конкретный формат
                 # — создаём и отправляем файл
-                if docx_utils.check_user_wants_word_format(user_text):
-                    await docx_utils.send_docx_response(user_id, answer)
-                    return "Вот Ваш файл в формате Word"
-                elif pdf_utils.check_user_wants_pdf_format(user_text):
-                    await pdf_utils.send_pdf_response(user_id, answer)
-                    return "Вот Ваш файл в формате PDF"
-                elif xlsx_utils.check_user_wants_xlsx_format(user_text):
-                    await xlsx_utils.send_xlsx_response(user_id, answer)
-                    return "Вот Ваш файл в формате Excel"
-                elif rtf_utils.check_user_wants_rtf_format(user_text):
-                    await rtf_utils.send_rtf_response(user_id, answer)
-                    return "Вот Ваш файл в формате RTF"
+                formatted = await _check_and_send_formatted(
+                    user_text, user_id, answer
+                )
+                return formatted if formatted is not None else answer
 
-                return answer
             case "chatgpt":
                 if not hasattr(request.app.state, "openai_client"):
                     return "OpenAI клиент не настроен."
                 client = request.app.state.openai_client
-                user_prompt = [{"role": "user", "content": user_text}]
+                # проверяем есть ли файл для включения в контекст
+                extracted_text = _get_file_extracted_text(user_id)
+                # получаем полный промпт с текстом файла, историей
+                # и контролем токенов
+                user_prompt = await full_prompt(
+                    user_id, user_text, extracted_text
+                )
                 answer = await client.chat(
                     messages=user_prompt,
                     model="gpt-5.2-chat-latest",
                 )
                 await db.add_billing(user_id, user_mode, user_text, 0, 5)
-                return answer
+                # Если пользователь запросил конкретный формат
+                # — создаём и отправляем файл
+                formatted = await _check_and_send_formatted(
+                    user_text, user_id, answer
+                )
+                return formatted if formatted is not None else answer
+
             case "gemini":
                 if not hasattr(request.app.state, "gemini_client"):
                     return "Gemini клиент не настроен."
                 client = request.app.state.gemini_client
-                user_prompt = [{"role": "user", "content": user_text}]
+                # проверяем есть ли файл для включения в контекст
+                extracted_text = _get_file_extracted_text(user_id)
+                # получаем полный промпт с текстом файла, историей
+                # и контролем токенов
+                user_prompt = await full_prompt(
+                    user_id, user_text, extracted_text
+                )
                 answer = await client.chat(
                     messages=user_prompt,
                     model="gemini-2.5-pro",
                 )
                 await db.add_billing(user_id, user_mode, user_text, 0, 5)
-                return answer
+                # Если пользователь запросил конкретный формат
+                # — создаём и отправляем файл
+                formatted = await _check_and_send_formatted(
+                    user_text, user_id, answer
+                )
+                return formatted if formatted is not None else answer
             case "mentor":
                 return await handle_mentor_mode(
                     request, user_text, user_id, user_mode
@@ -329,6 +338,40 @@ async def handle_file(file_name: str, sender: dict) -> str | None:
         set_user_file_data(user_id, {"extracted_text": extracted_text})
 
         return "Файл получен"
+
+
+def _get_file_extracted_text(user_id: int) -> str:
+    """
+    Возвращает текст, извлечённый из файла, загруженного пользователем.
+    Если файл не загружен — возвращает пустую строку.
+    """
+    file_data = get_user_file_data(user_id)
+    if file_data and "extracted_text" in file_data:
+        return file_data["extracted_text"]
+    return ""
+
+
+async def _check_and_send_formatted(
+    user_text: str, user_id: int, answer: str
+) -> str | None:
+    """
+    Проверяет, запросил ли пользователь конкретный формат файла,
+    создаёт и отправляет файл нужного формата.
+    Возвращает строку-уведомление или None, если формат не запрошен.
+    """
+    if docx_utils.check_user_wants_word_format(user_text):
+        await docx_utils.send_docx_response(user_id, answer)
+        return "Вот Ваш файл в формате Word"
+    if pdf_utils.check_user_wants_pdf_format(user_text):
+        await pdf_utils.send_pdf_response(user_id, answer)
+        return "Вот Ваш файл в формате PDF"
+    if xlsx_utils.check_user_wants_xlsx_format(user_text):
+        await xlsx_utils.send_xlsx_response(user_id, answer)
+        return "Вот Ваш файл в формате Excel"
+    if rtf_utils.check_user_wants_rtf_format(user_text):
+        await rtf_utils.send_rtf_response(user_id, answer)
+        return "Вот Ваш файл в формате RTF"
+    return None
 
 
 async def _handle_edit_mode(user_text: str, sender: dict) -> str:
