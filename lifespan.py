@@ -120,4 +120,8 @@ async def lifespan(app: FastAPI):
         logger.info("Shutting down, closing openai_client...")
         await app.state.openai_client.close()
 
+    if hasattr(app.state, 'gemini_client'):
+        logger.info("Shutting down, closing gemini_client...")
+        await app.state.gemini_client.close()
+
     logger.info("Shutdown complete")

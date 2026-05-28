@@ -18,8 +18,20 @@ class OpenAIClient:
     """Async-обёртка для OpenAI ChatGPT."""
 
     def __init__(self, api_key: str):
+        import httpx
         from openai import AsyncOpenAI
-        self._client = AsyncOpenAI(api_key=api_key)
+        from utils import get_socks_proxy_mount
+
+        # Если PROXY_IP задан в .env — подключаем SOCKS5-прокси.
+        # AsyncOpenAI принимает httpx.AsyncClient через параметр http_client.
+        # close() OpenAI-клиента автоматически закрывает переданный httpx-клиент.
+        transport = get_socks_proxy_mount()
+        if transport:
+            http_client = httpx.AsyncClient(transport=transport)
+            self._client = AsyncOpenAI(api_key=api_key, http_client=http_client)
+            logger.info("OpenAI клиент создан с SOCKS5-прокси")
+        else:
+            self._client = AsyncOpenAI(api_key=api_key)
 
     async def chat(
         self,
@@ -35,20 +47,29 @@ class OpenAIClient:
             f"temperature={temperature}, max_tokens={max_tokens}"
         )
         try:
-            response = await self._client.chat.completions.create(
+            # gpt-5.x работает только через responses API (не chat.completions).
+            # Паттерн взят из models_config.py → client.responses.create().
+            # Параметры temperature и max_output_tokens не передаём —
+            # в рабочем примере models_config.py они отсутствуют,
+            # и их передача вызывает 400 Bad Request.
+            response = await self._client.responses.create(
                 model=model_name,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
+                input=messages,
             )
-            content = response.choices[0].message.content
-            if content is None:
+            content = response.output_text
+            if not content:
                 raise RuntimeError("Пустой контент в ответе OpenAI")
             logger.info(f"OpenAI.chat: ответ ({len(content)} символов)")
             return content
+        except RuntimeError:
+            raise
         except Exception as e:
-            logger.error(f"OpenAI error: {e}", exc_info=True)
-            raise RuntimeError(f"Ошибка OpenAI: {e}")
+            # Логируем без exc_info чтобы избежать потенциальных
+            # проблем loguru при нестандартных типах исключений SDK
+            err_type = type(e).__name__
+            err_msg = str(e)
+            logger.error(f"OpenAI error [{err_type}]: {err_msg}")
+            raise RuntimeError(f"Ошибка OpenAI ({err_type}): {err_msg}")
 
     async def close(self):
         await self._client.close()
@@ -58,8 +79,48 @@ class GeminiClient:
     """Async-обёртка для Google Gemini."""
 
     def __init__(self, api_key: str):
+        import os
         from google import genai
+        from utils import get_proxy_url
+
+        # google-genai SDK не поддерживает поле proxy в HttpOptions.
+        # Используем временную установку env-переменных: httpx читает
+        # ALL_PROXY / HTTPS_PROXY в своём __init__ (trust_env=True по умолчанию)
+        # — то есть в момент создания genai.Client, а не каждого запроса.
+        # После создания клиента окружение восстанавливается, чтобы прокси
+        # не подхватили GigaChat, MAX API и другие http-клиенты процесса.
+        # SOCKS5 требует установленного пакета httpx-socks.
+        proxy_url = get_proxy_url()
+        _saved: dict[str, str | None] = {}
+        if proxy_url:
+            for key in ("ALL_PROXY", "HTTPS_PROXY"):
+                _saved[key] = os.environ.get(key)
+                os.environ[key] = proxy_url
+
         self._client = genai.Client(api_key=api_key)
+
+        # Восстанавливаем окружение — прокси уже захвачен httpx-клиентом внутри genai
+        if proxy_url:
+            for key, prev in _saved.items():
+                if prev is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = prev
+            logger.info("Gemini клиент создан с SOCKS5-прокси")
+
+        # _async_httpx_client в genai создаётся лениво (при первом запросе).
+        # asyncio-runner в Python 3.12 вызывает aclose() при cleanup до того,
+        # как клиент был инициализирован → AttributeError.
+        # Патчим aclose() на экземпляре, чтобы перехватить этот случай.
+        _original_aclose = self._client._api_client.aclose
+
+        async def _safe_aclose():
+            try:
+                await _original_aclose()
+            except AttributeError:
+                pass
+
+        self._client._api_client.aclose = _safe_aclose
 
     async def chat(
         self,
@@ -113,6 +174,17 @@ class GeminiClient:
         except Exception as e:
             logger.error(f"Gemini error: {e}", exc_info=True)
             raise RuntimeError(f"Ошибка Gemini: {e}")
+
+    async def close(self):
+        """
+        Закрывает внутренний httpx-клиент Gemini.
+        _async_httpx_client создаётся лениво при первом запросе,
+        поэтому если запросов не было — AttributeError игнорируется.
+        """
+        try:
+            await self._client._api_client.aclose()
+        except AttributeError:
+            pass
 
 
 class GigaChatClient:

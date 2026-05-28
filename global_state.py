@@ -83,8 +83,10 @@ MODELS = {
     "image": "gemini-3-pro-image-preview",
     "edit": "gemini-3-pro-image-preview",
     "ai_file": "gpt-5.2-chat-latest",
-    "gigachat" : "GigaChat",
-    "gigachatpro" : "GigaChat"
+    "gigachat": "GigaChat",
+    "gigachatpro": "GigaChat",
+    "chatgpt": "gpt-5.2-chat-latest",   # режим ChatGPT
+    "gemini": "gemini-2.5-pro",          # режим Gemini
 }
 
 # ─── Настройки webhook ───
