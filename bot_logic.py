@@ -198,7 +198,7 @@ async def handle_message(
                 return answer
             case "chatgpt":
                 if not hasattr(request.app.state, "openai_client"):
-                    return "OpenAI клиент не настроен. Проверьте OPENAI_API_KEY в .env"
+                    return "OpenAI клиент не настроен."
                 client = request.app.state.openai_client
                 user_prompt = [{"role": "user", "content": user_text}]
                 answer = await client.chat(
@@ -209,7 +209,7 @@ async def handle_message(
                 return answer
             case "gemini":
                 if not hasattr(request.app.state, "gemini_client"):
-                    return "Gemini клиент не настроен. Проверьте GEMINI_API_KEY в .env"
+                    return "Gemini клиент не настроен."
                 client = request.app.state.gemini_client
                 user_prompt = [{"role": "user", "content": user_text}]
                 answer = await client.chat(
