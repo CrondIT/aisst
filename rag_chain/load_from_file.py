@@ -255,86 +255,91 @@ async def save_to_vector_db(
     автоматически уменьшает chunk_size вдвое и повторяет для проблемного батча.
     Минимальный chunk_size = CHUNK_SIZE_MIN (200 символов).
     """
-    # ── 1. Проверяем наличие файла в базе по хешу ───────────────────────────
-    embeddings = get_giga_embeddings(model_name)
-    file_id = get_file_hash(file_path)
-
-    is_file_found, vector_db = is_file_in_vector_db(
-        file_path, file_id, persist_dir, embeddings
-    )
-    if is_file_found:
-        logger.info(f"Файл уже есть в базе: {file_path}")
-        return f"Файл уже загружен: {file_path}"
-
-    # ── 2. Загружаем документ ───────────────────────────────────────────────
-    loader = await get_loader_for_file(file_path)
-    if loader is None:
-        return f"Формат не поддерживается: {file_path}"
-
     try:
-        documents = loader.load()
-        # Добавляем имя файла и file_id в метаданные каждого документа
-        filename = _extract_name_from_filename(os.path.basename(file_path))
-        for doc in documents:
-            doc.metadata["filename"] = filename
-            doc.metadata["file_id"] = file_id
-    except Exception as e:
-        logger.error(f"Не удалось извлечь текст из {file_path}: {e}")
-        return f"Не удалось извлечь текст из {file_path}: {e}"
+        # ── 1. Проверяем наличие файла в базе по хешу ───────────────────────────
+        embeddings = get_giga_embeddings(model_name)
+        file_id = get_file_hash(file_path)
 
-    total_chars = sum(len(doc.page_content) for doc in documents)
-    logger.info(
-        f"Загружен документ: {os.path.basename(file_path)}, "
-        f"страниц: {len(documents)}, символов: {total_chars}"
-    )
+        is_file_found, vector_db = is_file_in_vector_db(
+            file_path, file_id, persist_dir, embeddings
+        )
+        if is_file_found:
+            logger.info(f"Файл уже есть в базе: {file_path}")
+            return f"Файл уже загружен: {file_path}"
 
-    # ── 3. Разбиваем на чанки ───────────────────────────────────────────────
-    splitter = _make_splitter(CHUNK_SIZE)
-    chunks = splitter.split_documents(documents)
-    logger.info(
-        f"Разбито на {len(chunks)} чанков "
-        f"(chunk_size={CHUNK_SIZE}, "
-        f"overlap={min(CHUNK_OVERLAP, CHUNK_SIZE // 4)})"
-    )
+        # ── 2. Загружаем документ ───────────────────────────────────────────────
+        loader = await get_loader_for_file(file_path)
+        if loader is None:
+            return f"Формат не поддерживается: {file_path}"
 
-    # ── 4. Добавляем батчами с retry при 413 ────────────────────────────────
-    batch_size = 10
-    failed_batches = 0
-    current_chunk_size = CHUNK_SIZE   # отслеживаем актуальный размер чанка
+        try:
+            documents = loader.load()
+            # Добавляем имя файла и file_id в метаданные каждого документа
+            filename = _extract_name_from_filename(os.path.basename(file_path))
+            for doc in documents:
+                doc.metadata["filename"] = filename
+                doc.metadata["file_id"] = file_id
+        except Exception as e:
+            logger.error(f"Не удалось извлечь текст из {file_path}: {e}")
+            return f"Не удалось извлечь текст из {file_path}: {e}"
 
-    for i in range(0, len(chunks), batch_size):
-        batch_docs = chunks[i:i + batch_size]
-
-        success, current_chunk_size = await _add_batch_with_retry(
-            vector_db=vector_db,
-            batch_docs=batch_docs,
-            batch_start_idx=i,
-            chunk_size=current_chunk_size,
-            file_id=file_id,
+        total_chars = sum(len(doc.page_content) for doc in documents)
+        logger.info(
+            f"Загружен документ: {os.path.basename(file_path)}, "
+            f"страниц: {len(documents)}, символов: {total_chars}"
         )
 
-        if success:
-            logger.info(
-                f"Батч {i // batch_size + 1}: "
-                f"загружено {i + len(batch_docs)} / {len(chunks)} чанков"
-            )
-        else:
-            failed_batches += 1
-            logger.error(
-                f"Батч с индекса {i} пропущен после всех попыток retry"
+        # ── 3. Разбиваем на чанки ───────────────────────────────────────────────
+        splitter = _make_splitter(CHUNK_SIZE)
+        chunks = splitter.split_documents(documents)
+        logger.info(
+            f"Разбито на {len(chunks)} чанков "
+            f"(chunk_size={CHUNK_SIZE}, "
+            f"overlap={min(CHUNK_OVERLAP, CHUNK_SIZE // 4)})"
+        )
+
+        # ── 4. Добавляем батчами с retry при 413 ────────────────────────────────
+        batch_size = 10
+        failed_batches = 0
+        current_chunk_size = CHUNK_SIZE   # отслеживаем актуальный размер чанка
+
+        for i in range(0, len(chunks), batch_size):
+            batch_docs = chunks[i:i + batch_size]
+
+            success, current_chunk_size = await _add_batch_with_retry(
+                vector_db=vector_db,
+                batch_docs=batch_docs,
+                batch_start_idx=i,
+                chunk_size=current_chunk_size,
+                file_id=file_id,
             )
 
-    # ── 5. Итоговый отчёт ──────────────────────────────────────────────────
-    if failed_batches:
+            if success:
+                logger.info(
+                    f"Батч {i // batch_size + 1}: "
+                    f"загружено {i + len(batch_docs)} / {len(chunks)} чанков"
+                )
+            else:
+                failed_batches += 1
+                logger.error(
+                    f"Батч с индекса {i} пропущен после всех попыток retry"
+                )
+
+        # ── 5. Итоговый отчёт ──────────────────────────────────────────────────
+        if failed_batches:
+            return (
+                f"Файл добавлен частично ({failed_batches} батч(ей) пропущено). "
+                f"Символов: {total_chars}, фрагментов: {len(chunks)}"
+            )
+
         return (
-            f"Файл добавлен частично ({failed_batches} батч(ей) пропущено). "
+            f"Файл добавлен в базу. "
             f"Символов: {total_chars}, фрагментов: {len(chunks)}"
         )
-
-    return (
-        f"Файл добавлен в базу. "
-        f"Символов: {total_chars}, фрагментов: {len(chunks)}"
-    )
+    finally:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info("Временный файл удалён: %s", file_path)
 
 
 def get_all_filenames_from_vector_db(
