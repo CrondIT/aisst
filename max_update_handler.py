@@ -63,6 +63,10 @@ async def _process_audio_and_respond(
         await max_api.send_message(
             user_id, "Произошла ошибка при обработке голосового сообщения."
         )
+    finally:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info("Временный файл голосового сообщения удалён: %s", file_path)
 
 
 def _check_rate_limit(user_id: int) -> bool:
