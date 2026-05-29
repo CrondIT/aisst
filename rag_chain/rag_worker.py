@@ -127,7 +127,6 @@ async def run_worker():
                         logger.exception(
                             f"Ошибка обработки задачи {task_id[:8]}...: {e}"
                         )
-                        # Публикуем ошибку
                         queue.publish_result(task_id, {
                             "status": "failed",
                             "error": str(e),

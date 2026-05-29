@@ -184,7 +184,10 @@ def verify_webhook_secret(
 
 
 async def subscribe_webhook() -> None:
-    """Создание webhook-подписки через POST /subscriptions."""
+    """Создание webhook-подписки через POST /subscriptions.
+    Перед созданием удаляет существующие подписки с тем же URL,
+    чтобы избежать дублирующихся уведомлений.
+    """
     if not MAX_API_TOKEN:
         logger.critical("MAX_API_TOKEN не задан в .env!")
         raise RuntimeError("MAX_API_TOKEN is required")
@@ -197,6 +200,50 @@ async def subscribe_webhook() -> None:
         "Authorization": MAX_API_TOKEN,
         "Content-Type": "application/json"
     }
+
+    # Удаляем существующие подписки с тем же URL (защита от дубликатов)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers)
+            if response.status_code == 200:
+                subscriptions = response.json()
+                # subscriptions может быть списком или dict с ключом subscriptions
+                if isinstance(subscriptions, dict):
+                    subs_list = subscriptions.get("subscriptions", [])
+                elif isinstance(subscriptions, list):
+                    subs_list = subscriptions
+                else:
+                    subs_list = []
+
+                deleted_count = 0
+                for sub in subs_list:
+                    sub_url = sub.get("url", "")
+                    sub_id = sub.get("id") or sub.get("subscription_id")
+                    if sub_url == WEBHOOK_URL and sub_id:
+                        del_resp = await client.delete(
+                            url, headers=headers, params={"subscription_id": sub_id}
+                        )
+                        if del_resp.status_code == 200:
+                            logger.info(
+                                f"Удалена старая подписка {sub_id} для {WEBHOOK_URL}"
+                            )
+                            deleted_count += 1
+                        else:
+                            logger.warning(
+                                f"Не удалось удалить подписку {sub_id}: "
+                                f"{del_resp.status_code}"
+                            )
+
+                if deleted_count > 0:
+                    logger.info(f"Удалено {deleted_count} старых подписок")
+            else:
+                logger.warning(
+                    f"Не удалось получить подписки: {response.status_code}"
+                )
+    except Exception as e:
+        logger.warning(f"Ошибка при очистке старых подписок: {e}")
+
+    # Создаём новую подписку
     payload = {
         "url": WEBHOOK_URL,
         "update_types": ["message_created", "message_callback"],

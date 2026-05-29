@@ -7,6 +7,24 @@ echo "=========================================="
 echo "Запуск AISST"
 echo "=========================================="
 
+# Очистка старых процессов перед запуском
+echo "Проверка запущенных процессов..."
+if pgrep -f "rag_worker" > /dev/null 2>&1; then
+    echo "⚠️  Остановка старых RAG Worker..."
+    pkill -f "rag_worker" || true
+    sleep 1
+fi
+if pgrep -f "redis_listener" > /dev/null 2>&1; then
+    echo "⚠️  Остановка старых Redis Listener..."
+    pkill -f "redis_listener" || true
+    sleep 1
+fi
+if pgrep -f "gunicorn main:app" > /dev/null 2>&1; then
+    echo "⚠️  Остановка старого Gunicorn..."
+    pkill -f "gunicorn main:app" || true
+    sleep 1
+fi
+
 # Активация виртуального окружения
 source .venv/bin/activate
 
