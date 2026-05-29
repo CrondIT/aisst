@@ -9,8 +9,8 @@ import os
 import sys
 from dotenv import load_dotenv
 
-# Добавляем путь к проекту для импортов
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Добавляем путь к проекту для импортов (rag_chain/../ = корень проекта)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 load_dotenv()
 
@@ -27,7 +27,7 @@ logger = logging.getLogger("rag_worker")
 
 # Импорт после настройки логирования
 from redis_utils import RedisQueue, RedisQueueError
-from load_from_file import save_to_vector_db
+from .load_from_file import save_to_vector_db
 import db as db_module
 
 

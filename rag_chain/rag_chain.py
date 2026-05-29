@@ -15,7 +15,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.language_models import BaseChatModel
 
-from rag_embeddings import get_giga_embeddings
+from .rag_embeddings import get_giga_embeddings
 from global_state import GUEST_RAG_DIR
 from utils import logger
 from prompt_repository import PromptRepository
@@ -215,9 +215,7 @@ def _get_rag_chain(
     current_params = (id(lc_llm), top_k, fetch_k, lambda_mult, prompt_id)
 
     if _rag_chain is None or _rag_chain_params != current_params:
-        from load_from_file import check_vector_db
-        from global_state import GUEST_RAG_DIR
-        from rag_embeddings import get_giga_embeddings
+        from .load_from_file import check_vector_db
 
         embeddings = get_giga_embeddings(model_name="Embeddings")
         vector_db = check_vector_db(persist_dir=GUEST_RAG_DIR, embeddings=embeddings)

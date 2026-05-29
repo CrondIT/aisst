@@ -1,5 +1,5 @@
-from rag_embeddings import get_giga_embeddings
-from load_from_file import check_vector_db
+from rag_chain import get_giga_embeddings
+from rag_chain import check_vector_db
 from global_state import GUEST_RAG_DIR
 
 embeddings = get_giga_embeddings('Embeddings')

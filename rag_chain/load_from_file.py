@@ -12,7 +12,7 @@ import hashlib
 
 from langchain_chroma import Chroma
 from global_state import GUEST_RAG_DIR
-from rag_embeddings import get_giga_embeddings
+from .rag_embeddings import get_giga_embeddings
 from utils import logger
 
 
@@ -72,7 +72,8 @@ def _extract_name_from_filename(filename: str) -> str:
 def check_vector_db(persist_dir: str, embeddings):
     """
     Загружает или создает векторную базу.
-    Использует синглтон: возвращает существующий инстанс, если директория не изменилась.
+    Использует синглтон: возвращает существующий инстанс, 
+    если директория не изменилась.
     При ошибке загрузки пробрасывает исключение.
     """
     global _vector_db, _vector_db_dir

@@ -15,7 +15,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.language_models import BaseChatModel
 
-from rag_embeddings import get_giga_embeddings
+from rag_chain import get_giga_embeddings
 from global_state import GUEST_RAG_DIR
 from utils import logger
 from prompt_repository import PromptRepository
@@ -123,7 +123,7 @@ _evaluation_chain_llm = None
 
 def _get_vector_db():
     """Получает инстанс ChromaDB через load_from_file."""
-    from load_from_file import check_vector_db
+    from rag_chain import check_vector_db
     
     embeddings = get_giga_embeddings(model_name="Embeddings")
     vector_db = check_vector_db(persist_dir=GUEST_RAG_DIR, embeddings=embeddings)
@@ -440,7 +440,7 @@ def check_document_exists(document_name: str) -> bool:
     Returns:
         True если документ найден, False иначе
     """
-    from load_from_file import get_all_filenames_from_vector_db
+    from rag_chain import get_all_filenames_from_vector_db
     
     try:
         all_docs = get_all_filenames_from_vector_db()
@@ -466,7 +466,7 @@ def find_document_name(partial_name: str) -> str | None:
     Returns:
         Полное имя документа или None если не найден
     """
-    from load_from_file import get_all_filenames_from_vector_db
+    from rag_chain import get_all_filenames_from_vector_db
     
     try:
         all_docs = get_all_filenames_from_vector_db()

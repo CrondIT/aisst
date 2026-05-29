@@ -115,7 +115,7 @@ def get_pending_files():
 import asyncio
 import json
 from pathlib import Path
-from load_from_file import save_to_vector_db
+from rag_chain import save_to_vector_db
 QUEUE_FILE = Path("file_processing_queue.json")
 async def process_queue():
     while True:

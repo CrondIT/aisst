@@ -18,7 +18,7 @@ from global_state import (
     get_prompt_edit_state,
 )
 from utils import logger
-from load_from_file import (
+from rag_chain import (
     save_to_vector_db,
     get_all_filenames_from_vector_db,
     delete_file_from_vector_db,

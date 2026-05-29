@@ -16,7 +16,7 @@ redis-cli ping > /dev/null 2>&1 && echo "✓ Redis подключён" || echo "
 
 # Запуск RAG Worker (фоновый процесс)
 echo "Запуск RAG Worker..."
-python rag_worker.py &
+python -m rag_chain.rag_worker &
 RAG_PID=$!
 echo "RAG Worker запущен (PID: $RAG_PID)"
 

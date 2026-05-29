@@ -7,7 +7,7 @@ echo "Остановка AISST..."
 pkill -f "gunicorn main:app" && echo "✓ Gunicorn остановлен" || true
 
 # Остановка RAG Worker
-pkill -f "python rag_worker.py" && echo "✓ RAG Worker остановлен" || true
+pkill -f "python -m rag_chain.rag_worker" && echo "✓ RAG Worker остановлен" || true
 
 # Остановка Redis Listener
 pkill -f "redis_listener" && echo "✓ Redis Listener остановлен" || true
