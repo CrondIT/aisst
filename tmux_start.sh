@@ -2,6 +2,12 @@
 # Скрипт запуска AISST в tmux-сессии с отдельными окнами для каждого процесса
 
 SESSION_NAME="aisst"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Пути к исполняемым файлам из venv
+PYTHON="$SCRIPT_DIR/.venv/bin/python"
+GUNICORN="$SCRIPT_DIR/.venv/bin/gunicorn"
 
 # Если сессия уже существует — убиваем её
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
@@ -28,24 +34,29 @@ if pgrep -f "gunicorn main:app" > /dev/null 2>&1; then
     sleep 1
 fi
 
-# Активация виртуального окружения
-source .venv/bin/activate
+# Проверка venv
+if [ ! -f "$PYTHON" ]; then
+    echo "❌ Виртуальное окружение не найдено: $PYTHON"
+    echo "Создайте: python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt"
+    exit 1
+fi
 
 # Создаём новую сессию с первым окном (rag_worker)
 echo "Создание tmux-сессии '$SESSION_NAME'..."
 tmux new-session -d -s "$SESSION_NAME" -n "rag_worker" \
-    "python -m rag_chain.rag_worker"
+    "$PYTHON -m rag_chain.rag_worker"
 
 # Добавляем окно для redis_listener
 tmux new-window -t "$SESSION_NAME" -n "redis_listener" \
-    "python -m redis_utils.redis_listener"
+    "$PYTHON -m redis_utils.redis_listener"
 
 # Добавляем окно для gunicorn
 tmux new-window -t "$SESSION_NAME" -n "gunicorn" \
-    "gunicorn main:app \
+    "$GUNICORN main:app \
         --workers 2 \
         --worker-class uvicorn.workers.UvicornWorker \
-        --bind 0.0.0.0:8000 \
+        --bind unix:/tmp/fastapi.sock \
+        --umask 000 \
         --timeout 300 \
         --keep-alive 60 \
         --access-logfile - \

@@ -3,9 +3,12 @@
 
 set -e
 
-echo "=========================================="
-echo "Запуск AISST"
-echo "=========================================="
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Пути к исполняемым файлам из venv
+PYTHON="$SCRIPT_DIR/.venv/bin/python"
+GUNICORN="$SCRIPT_DIR/.venv/bin/gunicorn"
 
 # Очистка старых процессов перед запуском
 echo "Проверка запущенных процессов..."
@@ -25,8 +28,12 @@ if pgrep -f "gunicorn main:app" > /dev/null 2>&1; then
     sleep 1
 fi
 
-# Активация виртуального окружения
-source .venv/bin/activate
+# Проверка venv
+if [ ! -f "$PYTHON" ]; then
+    echo "❌ Виртуальное окружение не найдено: $PYTHON"
+    echo "Создайте: python3 -m venv .venv && pip install -r requirements.txt"
+    exit 1
+fi
 
 # Проверка Redis
 echo "Проверка Redis..."
@@ -34,22 +41,23 @@ redis-cli ping > /dev/null 2>&1 && echo "✓ Redis подключён" || echo "
 
 # Запуск RAG Worker (фоновый процесс)
 echo "Запуск RAG Worker..."
-python -m rag_chain.rag_worker &
+$PYTHON -m rag_chain.rag_worker &
 RAG_PID=$!
 echo "RAG Worker запущен (PID: $RAG_PID)"
 
 # Запуск Redis Listener (для уведомлений)
 echo "Запуск Redis Listener..."
-python -m redis_utils.redis_listener &
+$PYTHON -m redis_utils.redis_listener &
 LISTENER_PID=$!
 echo "Redis Listener запущен (PID: $LISTENER_PID)"
 
 # Запуск Gunicorn с увеличенным timeout
 echo "Запуск Gunicorn..."
-gunicorn main:app \
+$GUNICORN main:app \
     --workers 2 \
     --worker-class uvicorn.workers.UvicornWorker \
-    --bind 0.0.0.0:8000 \
+    --bind unix:/tmp/fastapi.sock \
+    --umask 000 \
     --timeout 300 \
     --keep-alive 60 \
     --access-logfile - \
