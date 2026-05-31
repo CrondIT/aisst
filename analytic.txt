@@ -1,0 +1,50 @@
+Аналитическая записка: Backend-аудит проекта aisst
+1. Стек
+Компонент	Решение
+Веб-фреймворк	FastAPI 0.135 + Uvicorn / Gunicorn (2 worker'а)
+ORM	SQLAlchemy 2.0 async (aiosqlite драйвер) — полностью асинхронная
+Валидация	Pydantic v2 (встроено в FastAPI), Type Hints повсеместно
+Миграции	Отсутствуют — create_database() в lifespan.py делает create_all() при старте, без Alembic
+Авторизация	Самописная: X-Admin-Token хедер → _verify_admin() dependency в routers.py; уровни доступа хранятся в поле User.permission (0=admin, 1=guest, 2=staff)
+Логирование	loguru (app_unified.log, ротация 5MB×10, gzip-сжатие)
+LLM	GigaChat (нативный SDK + LangChain-обёртка), OpenAI (responses API), Gemini (google-genai)
+Эмбеддинги	GigaChatEmbeddings (langchain-gigachat)
+Векторная БД	ChromaDB 1.5.8, persist на диск в rag/guest/
+Кэш / очереди	Redis (опционально, USE_REDIS в .env)
+2. Архитектурный паттерн
+Проект использует модифицированный плоский FastAPI-паттерн с частичным разделением слоёв. Полноценного Controllers → Services → Repositories нет, но прослеживается следующая расслоённость:
+routers.py (HTTP entry)
+    └── max_update_handler.py  (Webhook dispatcher / "Controller")
+            └── bot_logic.py             (Business Logic / "Service")
+                    ├── rag_chain/       (RAG domain module)
+                    ├── mentor/          (Mentor domain module)
+                    ├── prompt_edit.py   (Prompt edit state machine)
+                    └── db.py / prompt_repository.py  (Data Access)
+Ключевые наблюдения:
+- bot_logic.py (432 строки) — это монолитный сервисный слой, совмещающий маршрутизацию по режимам, бизнес-логику и вызовы внешних API. При дальнейшем росте — кандидат на рефакторинг.
+- prompt_repository.py — единственный настоящий Repository-класс (PromptRepository static class).
+- db.py совмещает модели и CRUD-функции (Active Record вместо чистого Repository).
+- Состояние сессий пользователя управляется через global_state.py — гибридная обёртка над Redis/in-memory словарями.
+3. Точки интеграции
+БД:
+- SQLite (async) → MAX_DB_PATH — пользователи, биллинг, промпты, версии промптов
+- ChromaDB (локальный persist) → rag/guest/chroma.sqlite3 — векторное хранилище документов
+Внешние API:
+API	Назначение	Модуль
+MAX Messenger API	Отправка/приём сообщений, webhook, загрузка файлов	max_api.py
+GigaChat (нативный SDK)	Прямой чат (режим gigachatpro)	ai_models.py
+GigaChat (LangChain)	RAG и Mentor цепочки	rag_chain/, mentor/
+SaluteSpeech REST	STT — транскрипция аудиосообщений	audio2text_salutespeech.py
+OpenAI	Альтернативный LLM (chatgpt режим)	ai_models.py
+Gemini	Альтернативный LLM (gemini режим)	ai_models.py
+Очереди задач:
+- Redis (LPUSH/BLPOP) → очередь rag для фоновой индексации файлов
+- Отдельный процесс rag_worker.py читает очередь, вызывает save_to_vector_db(), публикует результат в Pub/Sub канал aisst:notifications
+- redis_listener.py — отдельный процесс-слушатель, доставляет уведомления пользователю через MAX API
+Замечания к архитектуре
+1. Нет Alembic — при изменении схемы БД нужен ручной DROP/CREATE. Критично для prod.
+2. billing_utils.py — мёртвый код, импортирует несуществующие telegram и dbbot. Можно удалить.
+3. bot_logic.py — God Object. Логику режимов (rag, mentor, edit) стоит вынести в отдельные handler-модули.
+4. DEBUG-вывод — print() на строке ~343 в global_state.py попадает в prod-логи.
+5. pyproject.tombl — опечатка в имени файла, не используется стандартным toolchain'ом.
+6. Синхронный GigaChat SDK — вызывается через ThreadPoolExecutor в роуте /giga-chat, что создаёт накладные расходы. LangChain-клиент (giga_lc_client) лишён этой проблемы.

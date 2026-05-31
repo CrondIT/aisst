@@ -42,7 +42,25 @@ MAX_REF_IMAGES = 6  # Максимальное количество изобра
 # ext in ALLOWED_EXTENSIONS.get("guestrag") -> True или False
 ALLOWED_EXTENSIONS = {
     "rag": {"pdf", "txt", "docx", "doc", "xlsx", "xls"},
-    "file": {"pdf", "docx", "txt"},
+    "chat": {
+        ".pdf",
+        ".docx",
+        ".txt",
+        ".xlsx",
+        ".xls",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".bmp",
+        ".tiff",
+        ".webp",
+        ".doc",  # Old Microsoft Word format
+        ".odf",  # OpenDocument Text
+        ".ods",  # OpenDocument Spreadsheet
+        ".odp",  # OpenDocument Presentation
+        ".ppt",  # PowerPoint slides
+        ".pptx",  # PowerPoint slides (newer format)
+    },
 }
 
 TEMP_DIR = os.getenv("TEMP_DIR", "temp")
