@@ -202,7 +202,7 @@ async def send_command(request: Request):
 
     sender = {"user_id": user_id, "name": "mini_app_user"}
 
-    result = await bot_logic.handle_command(command, sender)
+    result = await bot_logic.handle_command(command, sender, request.app.state)
     if result:
         await max_api.send_message(user_id, result)
 

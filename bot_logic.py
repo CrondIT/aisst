@@ -1,4 +1,5 @@
 """Модуль бизнес-логики бота: обработка команд и сообщений."""
+import os
 from fastapi import Request
 
 import db
@@ -10,17 +11,21 @@ from global_state import (
     enqueue_task,
     _use_redis,
     clear_mentor_state,
+    get_user_edit_queue,
+    set_user_edit_queue,
+    MAX_REF_IMAGES,
+    get_user_edit_data,
+    set_user_edit_data,
 )
 from utils import logger
 from rag_chain import save_to_vector_db
 from mentor.mentor_logic import handle_mentor_mode
-from handlers import (
-    GigachatHandler,
-    LlmDirectHandler,
-    RagHandler,
-    EditHandler,
-    ModeHandler,
-)
+from handlers.base import ModeHandler
+from handlers.gigachat_handler import GigachatHandler
+from handlers.llm_handler import LlmDirectHandler
+from handlers.rag_handler import RagHandler
+from handlers.edit_handler import EditHandler
+from handlers.image_handler import ImageHandler
 import extract_text_from_file_utils
 
 mode_map = {
@@ -74,6 +79,12 @@ mode_map = {
         "edit",
         "Режим: редактирование промптов"
     ),
+    "/image": (
+        "image",
+        "Режим: генерация и редактирование изображений\n"
+        "Отправьте текстовый запрос для создания изображения\n"
+        "Или отправьте изображение с описанием для редактирования"
+    ),
 }
 
 
@@ -95,10 +106,40 @@ HANDLERS: dict[str, ModeHandler] = {
     "mentor":      _MentorHandlerWrapper(),
     "edit":        EditHandler(),
     "rag":         RagHandler(),
+    "image":       ImageHandler(),
 }
 
 
-async def handle_command(user_text: str, sender: dict) -> str | None:
+async def _handle_models_command(app_state: object) -> str:
+    """Возвращает список доступных моделей Gemini и OpenAI."""
+    lines = []
+    
+    if app_state and hasattr(app_state, "gemini_client"):
+        try:
+            gemini_info = await app_state.gemini_client.list_models()
+            lines.append(gemini_info)
+        except Exception as e:
+            logger.error(f"Ошибка получения моделей Gemini: {e}")
+            lines.append("❌ Не удалось получить модели Gemini")
+    else:
+        lines.append("⚠️ Gemini клиент не настроен")
+    
+    if app_state and hasattr(app_state, "openai_client"):
+        try:
+            openai_info = await app_state.openai_client.list_models()
+            lines.append(openai_info)
+        except Exception as e:
+            logger.error(f"Ошибка получения моделей OpenAI: {e}")
+            lines.append("❌ Не удалось получить модели OpenAI")
+    else:
+        lines.append("⚠️ OpenAI клиент не настроен")
+    
+    return "\n\n".join(lines)
+
+
+async def handle_command(
+    user_text: str, sender: dict, app_state: object = None
+) -> str | None:
     """
     Обработка команд бота - устанавливает режим пользователя
     и возвращает текст ответа для информирования пользователя 
@@ -122,14 +163,34 @@ async def handle_command(user_text: str, sender: dict) -> str | None:
             return f"Уважаемый: {user_name}!\n" f"Ваш баланс: {balance} ₽"
         return f"Пользователь: {user_name} в списках не значится)"
     
+    if command == "/models":
+        return await _handle_models_command(app_state)
+    
     if command == "/mode":
         return get_user_mode(user_id)
     
     if command in mode_map:
         mode, reply = mode_map[command]
+        
+        # При переключении с image — удаляем последний сохранённый файл
+        current_mode = get_user_mode(user_id)
+        if current_mode == "image" and mode != "image":
+            edit_data = get_user_edit_data(user_id)
+            last_edited = edit_data.get("last_image")
+            if last_edited:
+                try:
+                    os.remove(last_edited)
+                except OSError:
+                    pass
+            set_user_edit_data(user_id, {})
+        
         set_user_mode(user_id, mode)
         # Очищаем состояние подтверждения удаления
         clear_user_pending_delete(user_id)
+        
+        # Для /image — очищаем очередь изображений для новой сессии
+        if command == "/image":
+            set_user_edit_queue(user_id, [])
         
         # Для /mentor — очищаем состояние ментора и парсим новую команду
         if command == "/mentor":
@@ -172,7 +233,17 @@ async def handle_image(
 ) -> str | None:
     """Обработка изображений."""
     user_id = int(sender.get("user_id"))
-    if get_user_mode(user_id) == "edit":
+    user_mode = get_user_mode(user_id)
+    if user_mode == "image":
+        # Добавляем изображение в очередь для редактирования
+        queue = get_user_edit_queue(user_id)
+        queue.append(image_path)
+        # Ограничиваем очередь последними MAX_REF_IMAGES
+        if len(queue) > MAX_REF_IMAGES:
+            queue = queue[-MAX_REF_IMAGES:]
+        set_user_edit_queue(user_id, queue)
+        return "Изображение получено. Опишите, что нужно изменить."
+    if user_mode == "edit":
         return "Режим редактирования ещё не реализован."
     return "Режим еще не работает"
 

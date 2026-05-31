@@ -120,7 +120,7 @@ async def process_update(
         logger.info(f"Callback от {sender.get('name')}: {callback_data}")
         if callback_data and user_id:
             command_response = await bot_logic.handle_command(
-                callback_data, sender
+                callback_data, sender, request.app.state
             )
             if command_response is not None:
                 await max_api.send_message(user_id, command_response)
@@ -204,7 +204,30 @@ async def process_update(
                     )
                 )
 
-        # 8.2 Файлы
+        # 8.2 Изображения
+        if att.get("type") == "image" and attr_url:
+            filename = att.get("filename", "image.png")
+            ext = filename.split('.')[-1].lower()
+            if ext not in ("png", "jpg", "jpeg", "gif", "webp", "bmp"):
+                ext = "png"
+            name = os.path.splitext(filename)[0]
+            file_path = await save_user_file(
+                attr_url, user_id, ext, "image", name
+            )
+            if not file_path:
+                logger.error(f"Не удалось загрузить изображение: {filename}")
+                await max_api.send_message(
+                    user_id, f"Не удалось загрузить изображение: {filename}"
+                )
+                return
+            reply_text = await bot_logic.handle_image(
+                request, file_path, sender
+            )
+            if reply_text:
+                await max_api.send_message(user_id, reply_text)
+            return
+
+        # 8.3 Файлы
         if att.get("type") == "file" and attr_url:
             filename = att.get("filename")
             if not filename:
@@ -253,7 +276,7 @@ async def process_update(
             return
         else:
             command_response = await bot_logic.handle_command(
-                user_text, sender
+                user_text, sender, request.app.state
             )
         if command_response is not None:
             await max_api.send_message(user_id, command_response)

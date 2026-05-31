@@ -98,8 +98,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # Модели для разных режимов
 MODELS = {
     "chat": "gpt-5.2-chat-latest",
-    "image": "gemini-3-pro-image-preview",
-    "edit": "gemini-3-pro-image-preview",
+    "image": "gemini-3.1-flash-image-preview",
     "ai_file": "gpt-5.2-chat-latest",
     "gigachat": "GigaChat",
     "gigachatpro": "GigaChat",

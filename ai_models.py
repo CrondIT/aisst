@@ -1,3 +1,4 @@
+import os
 from gigachat.models import Chat, Messages, MessagesRole
 from typing import Optional, List
 from utils import logger
@@ -39,6 +40,7 @@ class OpenAIClient:
         temperature: float = 0.7,
         max_tokens: int = 4096,
         model: str = "gpt-5.2-chat-latest",
+        enable_web_search: bool = True,
     ) -> str:
         model_name = model
         logger.info(
@@ -46,6 +48,14 @@ class OpenAIClient:
             f"сообщений={len(messages)}, "
             f"temperature={temperature}, max_tokens={max_tokens}"
         )
+         # Инструменты подключаем только если разрешён поиск
+        tools = []
+        if enable_web_search:
+            tools.append(
+                {
+                    "type": "web_search",
+                }
+            )
         try:
             # gpt-5.x работает только через responses API 
             # (не chat.completions).
@@ -53,6 +63,8 @@ class OpenAIClient:
             response = await self._client.responses.create(
                 model=model_name,
                 input=messages,
+                tools=tools,
+                timeout=300,
             )
             content = response.output_text
             if not content:
@@ -71,6 +83,21 @@ class OpenAIClient:
 
     async def close(self):
         await self._client.close()
+
+    async def list_models(self) -> str:
+        """Возвращает список доступных моделей OpenAI."""
+        try:
+            models = await self._client.models.list()
+            lines = ["🤖 Доступные модели OpenAI:"]
+            for model in models.data:
+                lines.append(f"🔹 `{model.id}`")
+            result = "\n".join(lines)
+            logger.info(f"OpenAI.list_models: найдено {len(models.data)} моделей")
+            return result
+        except Exception as e:
+            err_msg = str(e)
+            logger.error(f"OpenAI.list_models: ошибка [{type(e).__name__}]: {err_msg}")
+            return f"❌ Ошибка при получении моделей OpenAI: {err_msg}"
 
 
 class GeminiClient:
@@ -185,6 +212,209 @@ class GeminiClient:
             await self._client._api_client.aclose()
         except AttributeError:
             pass
+
+    async def list_models(self) -> str:
+        """Возвращает список доступных моделей Gemini."""
+        try:
+            models = self._client.models.list()
+            lines = ["🤖 Доступные модели Gemini:"]
+            for model in models:
+                model_id = model.name.split("/")[-1] if "/" in model.name else model.name
+                input_tokens = getattr(model, "input_token_limit", "н/д")
+                output_tokens = getattr(model, "output_token_limit", "н/д")
+                methods = ", ".join(getattr(model, "supported_actions", []))
+                temp = (
+                    f"{model.temperature:.1f}"
+                    if hasattr(model, "temperature") and model.temperature is not None
+                    else "не задана"
+                )
+                lines.append(
+                    f"🔹 *{model_id}*\n"
+                    f"  Вход: {input_tokens} токенов\n"
+                    f"  Выход: {output_tokens} токенов\n"
+                    f"  Методы: {methods}\n"
+                    f"  Температура: {temp}"
+                )
+            result = "\n\n".join(lines)
+            logger.info(f"Gemini.list_models: найдено {len(list(models))} моделей")
+            return result
+        except Exception as e:
+            err_msg = str(e)
+            logger.error(f"Gemini.list_models: ошибка [{type(e).__name__}]: {err_msg}")
+            return f"❌ Ошибка при получении моделей Gemini: {err_msg}"
+
+    async def generate_image(
+        self,
+        image_paths: list[str],
+        prompt: str,
+        model: str = None,
+    ) -> tuple[bytes | None, str | None]:
+        """
+        Генерирует новое изображение или редактирует существующие.
+
+        Args:
+            image_paths: список путей к изображениям (пустой = генерация)
+            prompt: текстовый запрос
+            model: модель (по умолчанию берётся из global_state.MODELS)
+
+        Returns:
+            (image_bytes, None) — если ответ изображение
+            (None, text_response) — если ответ текст
+        """
+        import io
+        from PIL import Image
+        from google.genai import types
+        from global_state import MODELS
+
+        model_name = model or MODELS["image"]
+
+        contents = []
+        if image_paths:
+            for path in image_paths:
+                if path and os.path.exists(path):
+                    img = Image.open(path)
+                    buffer = io.BytesIO()
+                    img.save(buffer, format="PNG")
+                    buffer.seek(0)
+                    contents.append(
+                        types.Part.from_bytes(
+                            data=buffer.read(),
+                            mime_type="image/png",
+                        )
+                    )
+            contents.append(prompt)
+        else:
+            contents = [prompt]
+
+        config = types.GenerateContentConfig(
+            response_modalities=["IMAGE"],
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                disable=True
+            ),
+        )
+
+        logger.info(
+            f"Gemini.generate_image: модель={model_name}, "
+            f"изображений={len([p for p in image_paths if p])}, "
+            f"запрос={prompt[:100]}"
+        )
+
+        try:
+            response = await self._client.aio.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=config,
+            )
+        except Exception as e:
+            err_type = type(e).__name__
+            err_msg = str(e)
+            logger.error(
+                f"Gemini.generate_image: SDK ошибка [{err_type}]: {err_msg}",
+                exc_info=True,
+            )
+            raise RuntimeError(f"Ошибка Gemini generate_image: {err_msg}")
+
+        # Логируем тип ответа
+        logger.info(
+            f"Gemini.generate_image: response type={type(response).__name__}"
+        )
+
+        # Парсим ответ через response.parts (официальный путь SDK для image-моделей)
+        if hasattr(response, "parts") and response.parts:
+            for part in response.parts:
+                try:
+                    if hasattr(part, "inline_data") and part.inline_data is not None:
+                        image_bytes = part.inline_data.data
+                        if isinstance(image_bytes, str):
+                            from base64 import b64decode
+                            image_bytes = b64decode(image_bytes)
+                        img = Image.open(io.BytesIO(image_bytes))
+                        output_buffer = io.BytesIO()
+                        img.save(output_buffer, "JPEG", quality=95)
+                        output_buffer.seek(0)
+                        result_bytes = output_buffer.getvalue()
+                        logger.info(
+                            f"Gemini.generate_image: изображение "
+                            f"({len(result_bytes)} байт)"
+                        )
+                        return result_bytes, None
+                    elif hasattr(part, "text") and part.text is not None:
+                        logger.info(
+                            f"Gemini.generate_image: текстовый ответ "
+                            f"({len(part.text)} символов)"
+                        )
+                        return None, part.text
+                except Exception as e:
+                    logger.error(
+                        f"Gemini.generate_image: ошибка парсинга part "
+                        f"[{type(e).__name__}]: {e}",
+                        exc_info=True,
+                    )
+                    continue
+
+        # Фоллбэк: парсинг через candidates (если response.parts недоступен)
+        candidates = None
+        try:
+            candidates = response.candidates
+        except KeyError as e:
+            logger.error(
+                f"Gemini.generate_image: KeyError '{e}' — "
+                f"вероятно API вернул ошибку. "
+                f"response={response}"
+            )
+            raise RuntimeError(
+                f"Gemini API вернул ошибку: {e}. "
+                f"Проверьте модель и запрос."
+            )
+        except Exception as e:
+            logger.error(
+                f"Gemini.generate_image: ошибка доступа к candidates "
+                f"[{type(e).__name__}]: {e}",
+                exc_info=True,
+            )
+
+        if not candidates:
+            raise RuntimeError(
+                f"Пустой ответ от Gemini generate_image. "
+                f"response type={type(response).__name__}"
+            )
+
+        for candidate in candidates:
+            try:
+                if not candidate.content or not candidate.content.parts:
+                    continue
+                for part in candidate.content.parts:
+                    if hasattr(part, "inline_data") and part.inline_data is not None:
+                        image_bytes = part.inline_data.data
+                        if isinstance(image_bytes, str):
+                            from base64 import b64decode
+                            image_bytes = b64decode(image_bytes)
+                        img = Image.open(io.BytesIO(image_bytes))
+                        output_buffer = io.BytesIO()
+                        img.save(output_buffer, "JPEG", quality=95)
+                        output_buffer.seek(0)
+                        result_bytes = output_buffer.getvalue()
+                        logger.info(
+                            f"Gemini.generate_image: изображение "
+                            f"({len(result_bytes)} байт)"
+                        )
+                        return result_bytes, None
+                    elif hasattr(part, "text") and part.text is not None:
+                        logger.info(
+                            f"Gemini.generate_image: текстовый ответ "
+                            f"({len(part.text)} символов)"
+                        )
+                        return None, part.text
+            except Exception as e:
+                logger.error(
+                    f"Gemini.generate_image: ошибка парсинга candidate "
+                    f"[{type(e).__name__}]: {e}",
+                    exc_info=True,
+                )
+                continue
+
+        raise ValueError("Не удалось получить изображение из ответа модели")
+
 
 
 class GigaChatClient:
