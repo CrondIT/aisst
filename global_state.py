@@ -216,6 +216,25 @@ SYSTEM_PROMPTS = {
         "Отвечай на вопросы касательно "
         "содержимого предоставленного файла."
     ),
+    "gigachat": (
+        "Ты — ассистент-помощник колледжа. Отвечай на вопросы студентов "
+        "на основе документов из базы знаний. Если информации нет в документах — "
+        "честно говори об этом. Поддерживай историю диалога, учитывай "
+        "предыдущие вопросы и ответы."
+    ),
+    "gigachatpro": (
+        "Ты — продвинутый AI-ассистент на базе GigaChat Pro. "
+        "Помогаешь пользователям с любыми вопросами, "
+        "предоставляя подробные и точные ответы."
+    ),
+    "chatgpt": (
+        "You are a helpful assistant powered by ChatGPT. "
+        "Provide clear, accurate, and detailed responses."
+    ),
+    "gemini": (
+        "You are a helpful assistant powered by Google Gemini. "
+        "Provide clear, accurate, and helpful responses."
+    ),
 }
 
 RTF_PROMPT = """
@@ -365,9 +384,8 @@ def _get_queue():
 
 def get_user_context(user_id: int, mode: str) -> list:
     """
-    Получает контекст пользователя для указанного режима.
-    При USE_REDIS=true - только из Redis.
-    При USE_REDIS=false - из памяти (in-memory словарь).
+    Получает контекст пользователя для указанного режима (синхронная версия).
+    Проверяет Redis/память, без обращения к БД.
     """
     if _use_redis:
         q = _get_queue()
@@ -375,7 +393,6 @@ def get_user_context(user_id: int, mode: str) -> list:
             context = q.get_user_state(user_id, f"context_{mode}")
             if context is not None:
                 return context
-        # Если Redis недоступен, возвращаем дефолтный контекст
     else:
         # Fallback к памяти (только для одиночного процесса)
         if user_id in user_contexts and mode in user_contexts[user_id]:
@@ -388,20 +405,110 @@ def get_user_context(user_id: int, mode: str) -> list:
 
 def set_user_context(user_id: int, mode: str, context: list):
     """
-    Сохраняет контекст пользователя для указанного режима.
-    При USE_REDIS=true - только в Redis.
-    При USE_REDIS=false - в память (in-memory словарь).
+    Сохраняет контекст пользователя в кэш (синхронная версия).
+    Сохраняет в Redis/память, без обращения к БД.
     """
     if _use_redis:
-        # Сохраняем только в Redis
         q = _get_queue()
         if q:
             q.set_user_state(user_id, f"context_{mode}", context)
     else:
-        # Сохраняем в память (только для одиночного процесса)
         if user_id not in user_contexts:
             user_contexts[user_id] = {}
         user_contexts[user_id][mode] = context
+
+
+async def get_user_context_async(user_id: int, mode: str) -> list:
+    """
+    Получает контекст пользователя для указанного режима (асинхронная версия).
+    Проверяет Redis/память → если не найден, загружает из БД → кэширует.
+    """
+    from db import load_user_context as load_db_context
+
+    # 1. Проверяем кэш (Redis или память)
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            context = q.get_user_state(user_id, f"context_{mode}")
+            if context is not None:
+                return context
+    else:
+        if user_id in user_contexts and mode in user_contexts[user_id]:
+            return user_contexts[user_id][mode]
+
+    # 2. Кэш пуст — пробуем загрузить из БД
+    db_context = await load_db_context(user_id, mode)
+    if db_context is not None:
+        # Кэшируем в Redis/память для следующих обращений
+        if _use_redis:
+            q = _get_queue()
+            if q:
+                q.set_user_state(user_id, f"context_{mode}", db_context)
+        else:
+            if user_id not in user_contexts:
+                user_contexts[user_id] = {}
+            user_contexts[user_id][mode] = db_context
+        return db_context
+
+    # 3. Контекст не найден — возвращаем дефолтный
+    system_message = SYSTEM_PROMPTS.get(mode, "You are a helpful assistant.")
+    return [{"role": "system", "content": system_message}]
+
+
+async def set_user_context_async(user_id: int, mode: str, context: list):
+    """
+    Сохраняет контекст пользователя (асинхронная версия).
+    Сохраняет в Redis/память (кэш) И в БД (постоянно).
+    """
+    from db import save_user_context as save_db_context
+
+    # 1. Сохраняем в кэш (Redis или память)
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.set_user_state(user_id, f"context_{mode}", context)
+    else:
+        if user_id not in user_contexts:
+            user_contexts[user_id] = {}
+        user_contexts[user_id][mode] = context
+
+    # 2. Сохраняем в БД (всегда, независимо от USE_REDIS)
+    try:
+        await save_db_context(user_id, mode, context)
+    except Exception as e:
+        logger.error(f"Не удалось сохранить контекст в БД: {e}")
+
+
+def clear_user_context(user_id: int, mode: str):
+    """
+    Очищает контекст пользователя для указанного режима.
+    Удаляет из Redis/памяти.
+    Для удаления из БД используйте clear_user_context_async().
+    """
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.delete_user_state(user_id, f"context_{mode}")
+    else:
+        if user_id in user_contexts and mode in user_contexts[user_id]:
+            del user_contexts[user_id][mode]
+
+
+async def clear_user_context_async(user_id: int, mode: str):
+    """
+    Очищает контекст пользователя для указанного режима (асинхронная версия).
+    Удаляет из Redis/памяти И из БД.
+    """
+    from db import delete_user_context as delete_db_context
+
+    # 1. Удаляем из кэша
+    clear_user_context(user_id, mode)
+
+    # 2. Удаляем из БД
+    try:
+        await delete_db_context(user_id, mode)
+    except Exception as e:
+        logger.error(f"Не удалось удалить контекст из БД: {e}")
 
 
 def get_user_mode(user_id: int) -> str:

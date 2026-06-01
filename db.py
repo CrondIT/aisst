@@ -1,3 +1,4 @@
+import json as json_module
 from datetime import datetime
 from utils import logger
 from sqlalchemy import (
@@ -9,6 +10,9 @@ from sqlalchemy import (
     func,
     Text,
     ForeignKey,
+    UniqueConstraint,
+    Index,
+    delete,
 )
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
@@ -112,6 +116,25 @@ class PromptVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     created_by: Mapped[int] = mapped_column(BigInteger, default=0)
     prompt: Mapped["Prompt"] = relationship(back_populates="versions")
+
+
+class UserContext(Base):
+    """Таблица для хранения контекстов диалогов пользователей."""
+    __tablename__ = "user_contexts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    mode: Mapped[str] = mapped_column(String(50), nullable=False)
+    context_data: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'mode', name='uq_user_mode'),
+        Index('idx_user_contexts_user_mode', 'user_id', 'mode'),
+        Index('idx_user_contexts_updated', 'updated_at'),
+    )
 
 
 async def create_database():
@@ -470,3 +493,89 @@ async def init_default_prompts():
             await db.commit()
     except Exception as e:
         logger.error(f"Ошибка при инициализации промптов: {e}")
+
+
+# ==================== User Context Persistence ====================
+
+async def save_user_context(user_id: int, mode: str, context: list[dict]) -> bool:
+    """
+    Сохраняет контекст пользователя в БД.
+    Обновляет запись, если она существует, иначе создаёт новую.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            from sqlalchemy import select
+
+            result = await db.execute(
+                select(UserContext).where(
+                    UserContext.user_id == user_id,
+                    UserContext.mode == mode
+                )
+            )
+            context_record = result.scalar_one_or_none()
+
+            context_json = json_module.dumps(context, ensure_ascii=False)
+            message_count = len([m for m in context if m.get("role") in ("user", "assistant")])
+
+            if context_record:
+                context_record.context_data = context_json
+                context_record.updated_at = datetime.now()
+                context_record.message_count = message_count
+            else:
+                new_context = UserContext(
+                    user_id=user_id,
+                    mode=mode,
+                    context_data=context_json,
+                    message_count=message_count
+                )
+                db.add(new_context)
+
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения контекста в БД: {e}")
+        return False
+
+
+async def load_user_context(user_id: int, mode: str) -> list[dict] | None:
+    """
+    Загружает контекст пользователя из БД.
+    Возвращает список сообщений или None, если контекст не найден.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            from sqlalchemy import select
+
+            result = await db.execute(
+                select(UserContext).where(
+                    UserContext.user_id == user_id,
+                    UserContext.mode == mode
+                )
+            )
+            context_record = result.scalar_one_or_none()
+
+            if context_record:
+                return json_module.loads(context_record.context_data)
+            return None
+    except Exception as e:
+        logger.error(f"Ошибка загрузки контекста из БД: {e}")
+        return None
+
+
+async def delete_user_context(user_id: int, mode: str) -> bool:
+    """
+    Удаляет контекст пользователя из БД для указанного режима.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                delete(UserContext).where(
+                    UserContext.user_id == user_id,
+                    UserContext.mode == mode
+                )
+            )
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка удаления контекста из БД: {e}")
+        return False

@@ -19,10 +19,12 @@ async def full_prompt(
     user_id: int,
     user_message: str,
     extracted_text: str,
+    context: list[dict] | None = None,
 ):
     """
-    Формирует пользовательский промпт с историей
-    и JSON схемой если нужно вывести ответ в виде файла
+    Формирует промпт с историей, файлом и JSON-схемой.
+    Если передан context — использует его как базу.
+    Если context=None — загружает из кэша через get_user_context().
     """
 
     wants_word_format = docx_utils.check_user_wants_word_format(user_message)
@@ -30,10 +32,8 @@ async def full_prompt(
     wants_excel_format = xlsx_utils.check_user_wants_xlsx_format(user_message)
     wants_rtf_format = rtf_utils.check_user_wants_rtf_format(user_message)
 
-    # Сохраняем оригинальный вопрос пользователя до вставки схемы
     original_user_message = user_message
 
-    # Определяем схему запрошенного формата
     format_schema: str | None = None
     if wants_word_format:
         format_schema = docx_utils.JSON_SCHEMA
@@ -44,8 +44,6 @@ async def full_prompt(
     elif wants_rtf_format:
         format_schema = RTF_PROMPT
 
-    # Для ветки "с файлом" схема по-прежнему добавляется в текст пользователя
-    # (там контекст файла формирует augmented_question)
     if format_schema:
         user_message = user_message + " " + format_schema
 
@@ -54,9 +52,7 @@ async def full_prompt(
     max_tokens = token_utils.get_token_limit(model_name)
     reserved_tokens_for_context = 2500
 
-    # Если есть текст из файла - формируем расширенный промпт
     if user_message and extracted_text:
-
         user_mode = get_user_mode(user_id)
         model_name = MODELS.get(user_mode)
         max_tokens = token_utils.get_token_limit(model_name)
@@ -127,7 +123,11 @@ async def full_prompt(
                     f"до {max_total_chars} символов для укладывания в лимиты."
                 )
 
-        history = get_user_context(user_id, user_mode)
+        if context is not None:
+            history = context
+        else:
+            history = get_user_context(user_id, user_mode)
+
         truncated_history = token_utils.truncate_messages_for_token_limit(
             history,
             model=model_name,
@@ -183,9 +183,6 @@ async def full_prompt(
     else:
         # Без файла
         if format_schema:
-            # Схема идёт в system-сообщение — LLM обязана вернуть JSON.
-            # Вопрос пользователя передаётся чистым, без схемы, чтобы модель
-            # не путала контент вопроса с инструкцией по формату вывода.
             return [
                 {
                     "role": "system",
@@ -198,7 +195,8 @@ async def full_prompt(
                 },
                 {"role": "user", "content": original_user_message},
             ]
-        # Просто возвращаем вопрос пользователя
+        if context is not None:
+            return context
         return [
             {"role": "user", "content": user_message}
         ]

@@ -16,6 +16,7 @@ from global_state import (
     MAX_REF_IMAGES,
     get_user_edit_data,
     set_user_edit_data,
+    clear_user_context_async,
 )
 from utils import logger
 from rag_chain import save_to_vector_db
@@ -84,6 +85,10 @@ mode_map = {
         "Режим: генерация и редактирование изображений\n"
         "Отправьте текстовый запрос для создания изображения\n"
         "Или отправьте изображение с описанием для редактирования"
+    ),
+    "/clear": (
+        None,
+        "Очистить историю диалога в текущем режиме"
     ),
 }
 
@@ -168,6 +173,12 @@ async def handle_command(
     
     if command == "/mode":
         return get_user_mode(user_id)
+    
+    if command in ("/clear", "/reset"):
+        user_mode = get_user_mode(user_id)
+        # Очищаем контекст текущего режима (из кэша И из БД)
+        await clear_user_context_async(user_id, user_mode)
+        return f"История диалога в режиме '{user_mode}' очищена."
     
     if command in mode_map:
         mode, reply = mode_map[command]

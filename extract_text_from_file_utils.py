@@ -6,7 +6,6 @@ import PyPDF2
 from docx import Document
 import pandas as pd
 import xlrd  # noqa # Required for legacy XLS files
-import pytesseract
 from PIL import Image as PILImage
 import fitz  # PyMuPDF
 from pptx import Presentation
@@ -130,6 +129,9 @@ async def extract_text_from_image(file_path: str) -> str:
                 ):
             return "OCR unavailable. Tesseract not installed or not in PATH."
 
+        # Lazy import pytesseract
+        import pytesseract
+
         # Use pytesseract to extract text from the image
         text = pytesseract.image_to_string(
             image, lang="eng+rus"
@@ -199,6 +201,8 @@ async def extract_text_from_pdf_with_ocr(file_path: str) -> str:
                                 check=True,
                                 timeout=5
                                 )
+                            # Lazy import pytesseract
+                            import pytesseract
                             # Use pytesseract to extract text from the image
                             page_text = pytesseract.image_to_string(
                                 PILImage.open(temp_img_path), lang="eng+rus"
