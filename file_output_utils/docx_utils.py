@@ -65,6 +65,62 @@ matplotlib.use("Agg")  # Use non-interactive backend
 # Для обратной совместимости, создаем алиас
 JSON_SCHEMA = DOCUMENT_JSON_SCHEMA
 
+# Словарь именованных CSS-цветов -> hex (без #)
+NAMED_COLORS = {
+    "black": "000000", "white": "FFFFFF", "red": "FF0000",
+    "green": "008000", "blue": "0000FF", "navy": "000080",
+    "navyblue": "000080", "brown": "A52A2A", "purple": "800080",
+    "darkgray": "A9A9A9", "darkgrey": "A9A9A9", "gray": "808080",
+    "grey": "808080", "lightgray": "D3D3D3", "lightgrey": "D3D3D3",
+    "orange": "FFA500", "yellow": "FFFF00", "pink": "FFC0CB",
+    "gold": "FFD700", "silver": "C0C0C0", "maroon": "800000",
+    "olive": "808000", "teal": "008080", "aqua": "00FFFF",
+    "lime": "00FF00", "fuchsia": "FF00FF", "indigo": "4B0082",
+    "coral": "FF7F50", "crimson": "DC143C", "wheat": "F5DEB3",
+    "tomato": "FF6347", "violet": "EE82EE", "slateblue": "6A5ACD",
+    "royalblue": "4169E1", "skyblue": "87CEEB", "steelblue": "4682B4",
+    "mediumblue": "0000CD", "darkblue": "00008B", "midnightblue": "191970",
+    "darkgreen": "006400", "forestgreen": "228B22", "seagreen": "2E8B57",
+    "darkred": "8B0000", "indianred": "CD5C5C", "firebrick": "B22222",
+    "chocolate": "D2691E", "saddlebrown": "8B4513", "sandybrown": "F4A460",
+    "peru": "CD853F", "tan": "D2B48C", "burlywood": "DEB887",
+    "darkorchid": "9932CC", "mediumorchid": "BA55D3", "plum": "DDA0DD",
+    "thistle": "D8BFD8", "lavender": "E6E6FA", "ghostwhite": "F8F8FF",
+    "aliceblue": "F0F8FF", "azure": "F0FFFF", "mintcream": "F5FFFA",
+    "honeydew": "F0FFF0", "ivory": "FFFFF0", "lightyellow": "FFFFE0",
+    "cornsilk": "FFF8DC", "lemonchiffon": "FFFACD", "papayawhip": "FFEFD5",
+    "blanchedalmond": "FFEBCD", "bisque": "FFE4C4", "moccasin": "FFE4B5",
+    "navajowhite": "FFDEAD", "peachpuff": "FFDAB9",
+}
+
+
+def parse_docx_color(color: str) -> tuple[int, int, int] | None:
+    """Преобразует цвет в RGB-кортеж (R, G, B).
+    Поддерживает hex (#RRGGBB, RRGGBB) и именованные CSS-цвета (Purple, NavyBlue...).
+    Возвращает None, если цвет не удалось распознать.
+    """
+    if not color:
+        return None
+    cleaned = color.strip().lower().replace(" ", "")
+    # Убираем #
+    if cleaned.startswith("#"):
+        cleaned = cleaned[1:]
+    # Пробуем как hex
+    if len(cleaned) == 6:
+        try:
+            return (
+                int(cleaned[0:2], 16),
+                int(cleaned[2:4], 16),
+                int(cleaned[4:6], 16),
+            )
+        except ValueError:
+            pass
+    # Пробуем как именованный цвет
+    if cleaned in NAMED_COLORS:
+        h = NAMED_COLORS[cleaned]
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    return None
+
 
 class DocxRenderer:
     def __init__(self):
@@ -238,13 +294,9 @@ class DocxRenderer:
             run.font.italic = italic
         if color:
             from docx.shared import RGBColor
-
-            # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
-            if len(color) == 6:
-                r = int(color[0:2], 16)
-                g = int(color[2:4], 16)
-                b = int(color[4:6], 16)
-                run.font.color.rgb = RGBColor(r, g, b)
+            rgb = parse_docx_color(color)
+            if rgb:
+                run.font.color.rgb = RGBColor(*rgb)
 
     def _add_page_numbers_to_footer(
         self, paragraph, content, page_number_settings
@@ -499,15 +551,10 @@ class DocxRenderer:
             if italic is not None:
                 run.font.italic = italic
             if color:
-                # Для цвета нужно импортировать RGBColor
                 from docx.shared import RGBColor
-
-                # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
-                if len(color) == 6:
-                    r = int(color[0:2], 16)
-                    g = int(color[2:4], 16)
-                    b = int(color[4:6], 16)
-                    run.font.color.rgb = RGBColor(r, g, b)
+                rgb = parse_docx_color(color)
+                if rgb:
+                    run.font.color.rgb = RGBColor(*rgb)
 
     def _paragraph(self, block: dict):
         # Используем параметры из JSON, если они есть, иначе - стандартные
@@ -538,13 +585,9 @@ class DocxRenderer:
             run.font.size = Pt(font_size)
         if color:
             from docx.shared import RGBColor
-
-            # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
-            if len(color) == 6:
-                r = int(color[0:2], 16)
-                g = int(color[2:4], 16)
-                b = int(color[4:6], 16)
-                run.font.color.rgb = RGBColor(r, g, b)
+            rgb = parse_docx_color(color)
+            if rgb:
+                run.font.color.rgb = RGBColor(*rgb)
 
         # Применяем отступы и интервалы
         if (
@@ -659,15 +702,11 @@ class DocxRenderer:
                     from docx.shared import Pt
 
                     run.font.size = Pt(font_size)
-                if color:
-                    from docx.shared import RGBColor
-
-                    # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
-                    if len(color) == 6:
-                        r = int(color[0:2], 16)
-                        g = int(color[2:4], 16)
-                        b = int(color[4:6], 16)
-                        run.font.color.rgb = RGBColor(r, g, b)
+        if color:
+            from docx.shared import RGBColor
+            rgb = parse_docx_color(color)
+            if rgb:
+                run.font.color.rgb = RGBColor(*rgb)
 
             # Применяем отступы и интервалы
             if (
@@ -811,13 +850,9 @@ class DocxRenderer:
                     run.font.italic = header_italic
                 if header_color:
                     from docx.shared import RGBColor
-
-                    # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
-                    if len(header_color) == 6:
-                        r = int(header_color[0:2], 16)
-                        g = int(header_color[2:4], 16)
-                        b = int(header_color[4:6], 16)
-                        run.font.color.rgb = RGBColor(r, g, b)
+                    rgb = parse_docx_color(header_color)
+                    if rgb:
+                        run.font.color.rgb = RGBColor(*rgb)
 
         # Применяем фоновый цвет к заголовкам, если указан
         if header_bg_color:
@@ -858,23 +893,17 @@ class DocxRenderer:
 
                     # Применяем цвет текста ко всей строке
                     if "text_color" in row_prop:
-                        text_color = row_prop["text_color"]
-                        if text_color.startswith("#"):
-                            text_color = text_color[1:]  # Убираем #
-
-                        from docx.shared import RGBColor
-
-                        if len(text_color) == 6:
-                            r = int(text_color[0:2], 16)
-                            g = int(text_color[2:4], 16)
-                            b = int(text_color[4:6], 16)
-                            rgb_color = RGBColor(r, g, b)
+                        text_color_raw = row_prop["text_color"]
+                        rgb_color = parse_docx_color(text_color_raw)
+                        if rgb_color:
+                            from docx.shared import RGBColor
+                            rgb_color_obj = RGBColor(*rgb_color)
 
                             # Применяем цвет ко всем ячейкам в строке
                             for cell in cells:
                                 for paragraph in cell.paragraphs:
                                     for run in paragraph.runs:
-                                        run.font.color.rgb = rgb_color
+                                        run.font.color.rgb = rgb_color_obj
 
             for col_idx, value in enumerate(row):
                 cleaned_value = clean_html_tags(str(value))
@@ -908,13 +937,9 @@ class DocxRenderer:
                         run.font.italic = body_italic
                     if body_color:
                         from docx.shared import RGBColor
-
-                        # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
-                        if len(body_color) == 6:
-                            r = int(body_color[0:2], 16)
-                            g = int(body_color[2:4], 16)
-                            b = int(body_color[4:6], 16)
-                            run.font.color.rgb = RGBColor(r, g, b)
+                        rgb = parse_docx_color(body_color)
+                        if rgb:
+                            run.font.color.rgb = RGBColor(*rgb)
 
                 # Применяем индивидуальные свойства ячейки
                 for cell_prop in cell_properties_list:
@@ -1026,20 +1051,16 @@ class DocxRenderer:
 
             # Применяем цвет текста
             if "text_color" in properties:
-                text_color = properties["text_color"]
-                if text_color.startswith("#"):
-                    text_color = text_color[1:]  # Убираем #
+                text_color_raw = properties["text_color"]
+                from docx.shared import RGBColor
+                rgb = parse_docx_color(text_color_raw)
+                if rgb:
+                    rgb_color = RGBColor(*rgb)
 
-                # Применяем цвет ко всем параграфам в ячейке
-                for paragraph in cell.paragraphs:
-                    for run in paragraph.runs:
-                        from docx.shared import RGBColor
-
-                        if len(text_color) == 6:
-                            r = int(text_color[0:2], 16)
-                            g = int(text_color[2:4], 16)
-                            b = int(text_color[4:6], 16)
-                            run.font.color.rgb = RGBColor(r, g, b)
+                    # Применяем цвет ко всем параграфам в ячейке
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.color.rgb = rgb_color
 
             # Применяем горизонтальное выравнивание
             if "horizontal_alignment" in properties:
@@ -1215,13 +1236,9 @@ class DocxRenderer:
                     caption_run.font.italic = italic
                 if color:
                     from docx.shared import RGBColor
-
-                    # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
-                    if len(color) == 6:
-                        r = int(color[0:2], 16)
-                        g = int(color[2:4], 16)
-                        b = int(color[4:6], 16)
-                        caption_run.font.color.rgb = RGBColor(r, g, b)
+                    rgb = parse_docx_color(color)
+                    if rgb:
+                        caption_run.font.color.rgb = RGBColor(*rgb)
 
         except Exception as e:
             # Если не удалось создать изображение формулы,
@@ -1251,13 +1268,9 @@ class DocxRenderer:
                 run.font.italic = italic
             if color:
                 from docx.shared import RGBColor
-
-                # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
-                if len(color) == 6:
-                    r = int(color[0:2], 16)
-                    g = int(color[2:4], 16)
-                    b = int(color[4:6], 16)
-                    run.font.color.rgb = RGBColor(r, g, b)
+                rgb = parse_docx_color(color)
+                if rgb:
+                    run.font.color.rgb = RGBColor(*rgb)
 
             print(f"Ошибка при рендеринге формулы: {e}")
 
@@ -1287,13 +1300,9 @@ class DocxRenderer:
                     caption_run.font.italic = italic
                 if color:
                     from docx.shared import RGBColor
-
-                    # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
-                    if len(color) == 6:
-                        r = int(color[0:2], 16)
-                        g = int(color[2:4], 16)
-                        b = int(color[4:6], 16)
-                        caption_run.font.color.rgb = RGBColor(r, g, b)
+                    rgb = parse_docx_color(color)
+                    if rgb:
+                        caption_run.font.color.rgb = RGBColor(*rgb)
 
         finally:
             # Очищаем matplotlib
@@ -1466,13 +1475,9 @@ class DocxRenderer:
                     caption_run.font.italic = italic
                 if color:
                     from docx.shared import RGBColor
-
-                    # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
-                    if len(color) == 6:
-                        r = int(color[0:2], 16)
-                        g = int(color[2:4], 16)
-                        b = int(color[4:6], 16)
-                        caption_run.font.color.rgb = RGBColor(r, g, b)
+                    rgb = parse_docx_color(color)
+                    if rgb:
+                        caption_run.font.color.rgb = RGBColor(*rgb)
 
         except Exception as e:
             # Если не удалось создать график, добавляем сообщение об ошибке
