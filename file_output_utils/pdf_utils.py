@@ -1459,6 +1459,16 @@ async def send_pdf_response(user_id: int, reply: str):
             cleaned_reply = cleaned_reply[:-3]
 
         cleaned_reply = cleaned_reply.strip()
+
+        # Исправляем JSON: добавляем кавычки к названиям полей без них
+        # (text: "value" -> "text": "value", не затрагивая строки внутри "")
+        import re
+        cleaned_reply = re.sub(
+            r'(\{|\,)\s*([a-zA-Z_]\w*)\s*:',
+            r'\1"\2":',
+            cleaned_reply,
+        )
+
         data = json.loads(cleaned_reply)
         pdf_buffer = create_pdf_from_json(data)
         pdf_bytes = pdf_buffer.getvalue()

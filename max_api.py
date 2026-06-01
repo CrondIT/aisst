@@ -11,9 +11,16 @@ from utils import logger, split_long_message
 import asyncio
 
 
-async def send_message(user_id: int, text: str) -> int | None:
-    """Отправка сообщения через API MAX. 
+async def send_message(
+    user_id: int, text: str, format: str = None
+) -> int | None:
+    """Отправка сообщения через API MAX.
        Автоматически разбивает текст на части, если он длиннее 4000 символов.
+       
+       Args:
+           user_id: ID пользователя
+           text: Текст сообщения
+           format: Формат текста ("markdown", "html" или None для plain text)
     """
     url = f"{MAX_BASE_URL}/messages"
     headers = {
@@ -29,6 +36,8 @@ async def send_message(user_id: int, text: str) -> int | None:
         last_status = None
         for i, part in enumerate(parts):
             payload = {"text": part}
+            if format in ("markdown", "html"):
+                payload["format"] = format
             try:
                 response = await client.post(
                     url, headers=headers, params=params, json=payload
@@ -118,9 +127,17 @@ BUTTONS = [
 
 
 async def send_inline_message(
-        user_id: int, text: str, buttons: list[dict] = None
+        user_id: int, text: str, buttons: list[dict] = None,
+        format: str = None
 ) -> int | None:
-    """Отправка сообщения с инлайн кнопками через API MAX."""
+    """Отправка сообщения с инлайн кнопками через API MAX.
+    
+    Args:
+        user_id: ID пользователя
+        text: Текст сообщения
+        buttons: Список кнопок
+        format: Формат текста ("markdown", "html" или None для plain text)
+    """
     if buttons is None:
         buttons = BUTTONS
     url = f"{MAX_BASE_URL}/messages"
@@ -152,6 +169,9 @@ async def send_inline_message(
             }
         }]
     }
+
+    if format in ("markdown", "html"):
+        payload["format"] = format
 
     async with httpx.AsyncClient() as client:
         try:

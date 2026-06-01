@@ -55,7 +55,7 @@ async def _process_audio_and_respond(
             )
             return
 
-        await max_api.send_message(user_id, reply_text)
+        await max_api.send_message(user_id, reply_text, format="markdown")
     except Exception as e:
         logger.error(
             f"Ошибка обработки голосового сообщения: {e}", exc_info=True
@@ -91,7 +91,7 @@ async def _process_file_async(
     try:
         result = await bot_logic.handle_file(file_path, sender)
         if result:
-            await max_api.send_message(user_id, result)
+            await max_api.send_message(user_id, result, format="markdown")
     except Exception:
         import traceback
         error_text = traceback.format_exc()
@@ -123,7 +123,7 @@ async def process_update(
                 callback_data, sender, request.app.state
             )
             if command_response is not None:
-                await max_api.send_message(user_id, command_response)
+                await max_api.send_message(user_id, command_response, format="markdown")
         return
 
     # 3. Фильтрация по типу
@@ -224,7 +224,7 @@ async def process_update(
                 request, file_path, sender
             )
             if reply_text:
-                await max_api.send_message(user_id, reply_text)
+                await max_api.send_message(user_id, reply_text, format="markdown")
             return
 
         # 8.3 Файлы
@@ -279,7 +279,7 @@ async def process_update(
                 user_text, sender, request.app.state
             )
         if command_response is not None:
-            await max_api.send_message(user_id, command_response)
+            await max_api.send_message(user_id, command_response, format="markdown")
             return
 
     try:
@@ -295,7 +295,7 @@ async def process_update(
             )
             return
 
-        await max_api.send_message(user_id, reply_text)
+        await max_api.send_message(user_id, reply_text, format="markdown")
     except Exception as e:
         logger.error(f"Ошибка при обработке сообщения: {e}", exc_info=True)
         await max_api.send_message(user_id, f"Произошла ошибка: {str(e)}")

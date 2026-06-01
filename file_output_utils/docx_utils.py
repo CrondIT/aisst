@@ -1556,6 +1556,14 @@ async def send_docx_response(
 
         cleaned_reply = cleaned_reply.strip()
 
+        # Исправляем JSON: добавляем кавычки к названиям полей без них
+        import re
+        cleaned_reply = re.sub(
+            r'(\{|\,)\s*([a-zA-Z_]\w*)\s*:',
+            r'\1"\2":',
+            cleaned_reply,
+        )
+
         data = json.loads(cleaned_reply)
         doc_io = io.BytesIO()
         renderer = DocxRenderer()
