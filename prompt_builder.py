@@ -53,10 +53,6 @@ async def full_prompt(
     reserved_tokens_for_context = 2500
 
     if user_message and extracted_text:
-        user_mode = get_user_mode(user_id)
-        model_name = MODELS.get(user_mode)
-        max_tokens = token_utils.get_token_limit(model_name)
-        reserved_tokens_for_context = 2500
         max_content_tokens = max_tokens - reserved_tokens_for_context
 
         avg_token_size = 3

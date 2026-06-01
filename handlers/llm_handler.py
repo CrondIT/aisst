@@ -8,7 +8,6 @@ from shared.message_utils import (
     get_file_extracted_text,
     check_and_send_formatted
 )
-from file_output_utils import docx_utils, pdf_utils, xlsx_utils, rtf_utils
 from handlers.base import ModeHandler
 from global_state import (
     get_user_context_async,
@@ -58,25 +57,13 @@ class LlmDirectHandler(ModeHandler):
         # 2. Добавляем сообщение пользователя
         context.append({"role": "user", "content": user_text})
 
-        # 3. Проверяем, есть ли файл или запрошен ли формат файла
+        # 3. Проверяем, есть ли файл
         extracted_text = get_file_extracted_text(user_id)
 
-        # Проверяем, запросил ли пользователь конкретный формат (PDF, DOCX, XLSX, RTF)
-        wants_format = (
-            docx_utils.check_user_wants_word_format(user_text)
-            or pdf_utils.check_user_wants_pdf_format(user_text)
-            or xlsx_utils.check_user_wants_xlsx_format(user_text)
-            or rtf_utils.check_user_wants_rtf_format(user_text)
+        # full_prompt сам обработает запрос формата (JSON-схему) и контекст
+        user_prompt = await full_prompt(
+            user_id, user_text, extracted_text, context=context
         )
-
-        if extracted_text or wants_format:
-            # Есть файл или запрошен формат — full_prompt добавит JSON-схему
-            user_prompt = await full_prompt(
-                user_id, user_text, extracted_text, context=context
-            )
-        else:
-            # Нет файла и формат не запрошен — используем контекст напрямую
-            user_prompt = context
 
         # 4. Обрезаем контекст по лимиту токенов (только если нет файла,
         #    иначе full_prompt уже сделал обрезку)
