@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+from collections import deque
 from dotenv import load_dotenv
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -714,6 +715,60 @@ def get_queue_stats() -> dict:
         if q:
             return q.get_stats()
     return {"error": "Redis not enabled"}
+
+
+# Хранилище обработанных message ID (для дедупликации)
+_processed_message_ids: deque = deque(maxlen=10000)  # FIFO с автоматическим ограничением
+_processed_message_ids_set: set = set()  # Для быстрой проверки
+
+
+def is_message_processed(mid: str) -> bool:
+    """
+    Проверяет, было ли сообщение уже обработано.
+    Использует Redis для синхронизации между воркерами.
+    
+    Args:
+        mid: Уникальный идентификатор сообщения
+    
+    Returns:
+        True если сообщение уже обработано
+    """
+    if not mid:
+        return False
+    
+    if _use_redis:
+        q = _get_queue()
+        if q and hasattr(q, 'redis'):
+            try:
+                # Используем Redis SET с TTL 1 час для хранения обработанных mid
+                key = f"processed_mid:{mid}"
+                result = q.redis.set(key, "1", nx=True, ex=3600)
+                # redis-py возвращает:
+                # - True если ключ был создан (сообщение новое)
+                # - None если ключ уже существует (сообщение дубликат)
+                is_duplicate = (result is None or result is False)
+                return is_duplicate
+            except Exception as e:
+                logger.warning(f"Ошибка проверки дубликата в Redis: {e}")
+                # Fallback на in-memory при ошибке Redis
+        else:
+            logger.warning(f"Redis недоступен для дедупликации, использую in-memory")
+    
+    # Fallback для in-memory режима
+    if mid in _processed_message_ids_set:
+        return True
+    
+    # Добавляем в deque (автоматически удалит старые при превышении maxlen)
+    _processed_message_ids.append(mid)
+    _processed_message_ids_set.add(mid)
+    
+    # Синхронизируем set с deque (удаляем из set то, что выпало из deque)
+    if len(_processed_message_ids_set) > len(_processed_message_ids) * 1.5:
+        # Пересоздаём set из deque для очистки старых записей
+        _processed_message_ids_set.clear()
+        _processed_message_ids_set.update(_processed_message_ids)
+    
+    return False
 
 
 def enqueue_task(

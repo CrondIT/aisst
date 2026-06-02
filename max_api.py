@@ -393,16 +393,59 @@ async def upload_file(
                 )
                 return None
             
-            result = response.json()
+            # Логируем ответ для отладки
+            logger.info(f"Ответ от upload URL: status={response.status_code}, content={response.text[:500]}")
             
-            # Для file/image возвращается token напрямую
-            # Для video/audio token приходит в ответе на загрузку
-            token = result.get("token")
+            # Проверяем, что ответ не пустой
+            if not response.text or response.text.strip() == "":
+                # Пустой ответ означает успешную загрузку
+                # Извлекаем token из URL загрузки (параметр photoIds)
+                from urllib.parse import urlparse, parse_qs
+                parsed = urlparse(upload_url)
+                query_params = parse_qs(parsed.query)
+                token = query_params.get("photoIds", [None])[0]
+                
+                if token:
+                    logger.info(f"Извлечен token из URL: {token}")
+                    return {
+                        "token": token,
+                        "type": file_type
+                    }
+                else:
+                    logger.error("Не удалось извлечь token из URL загрузки")
+                    return None
             
-            if not token:
-                logger.error("Не получен token после загрузки файла")
+            # Парсим JSON ответ
+            try:
+                result = response.json()
+            except Exception as e:
+                logger.error(f"Ошибка парсинга JSON ответа: {e}, content={response.text[:200]}")
                 return None
             
+            # Извлекаем token из разных форматов ответа
+            token = None
+            
+            # Формат 1: {"token": "..."}
+            if "token" in result:
+                token = result["token"]
+            
+            # Формат 2: {"photos": {"photoId": {"token": "..."}}}
+            elif "photos" in result and isinstance(result["photos"], dict):
+                photos = result["photos"]
+                # Берём первое фото из словаря
+                for photo_id, photo_data in photos.items():
+                    if isinstance(photo_data, dict) and "token" in photo_data:
+                        token = photo_data["token"]
+                        break
+            
+            # Формат 3: другие возможные варианты
+            # Можно добавить при необходимости
+            
+            if not token:
+                logger.error(f"Не получен token после загрузки файла. Ответ: {result}")
+                return None
+            
+            logger.info(f"Успешно получен token для {file_type}")
             return {
                 "token": token,
                 "type": file_type

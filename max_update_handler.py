@@ -48,14 +48,17 @@ async def _process_audio_and_respond(
         reply_text = await bot_logic.handle_message(
             request, recognized_text, sender
         )
-        if not reply_text:
+        # None означает ошибку, пустая строка "" означает успех без ответа
+        if reply_text is None:
             logger.error(f"Пустой ответ для пользователя: {user_id}")
             await max_api.send_message(
                 user_id, "Извините, не смог сформировать ответ."
             )
             return
 
-        await max_api.send_message(user_id, reply_text, format="markdown")
+        # Отправляем ответ только если он не пустой
+        if reply_text:
+            await max_api.send_message(user_id, reply_text, format="markdown")
     except Exception as e:
         logger.error(
             f"Ошибка обработки голосового сообщения: {e}", exc_info=True
@@ -131,22 +134,47 @@ async def process_update(
         return
 
     message = update.get("message", {})
+    # Timestamp может быть в message.timestamp (миллисекунды) или message.created_at (ISO)
+    message_timestamp_ms = message.get("timestamp")
     message_created_at = message.get("created_at")
-    if (
-        message_created_at
-        and lifespan.SERVER_START_TIME
-        and message_created_at < lifespan.SERVER_START_TIME.isoformat()
-    ):
-        logger.info(
-            f"Пропущено старое сообщение: {message.get('message_id')}"
-        )
-        return
+    
+    if lifespan.SERVER_START_TIME:
+        server_start_ms = int(lifespan.SERVER_START_TIME.timestamp() * 1000)
+        
+        # Проверяем timestamp в миллисекундах
+        if message_timestamp_ms and message_timestamp_ms < server_start_ms:
+            logger.info(
+                f"Пропущено старое сообщение (timestamp): "
+                f"mid={message.get('body', {}).get('mid')}"
+            )
+            return
+        
+        # Проверяем created_at в ISO формате
+        if (
+            message_created_at
+            and message_created_at < lifespan.SERVER_START_TIME.isoformat()
+        ):
+            logger.info(
+                f"Пропущено старое сообщение (created_at): "
+                f"mid={message.get('body', {}).get('mid')}"
+            )
+            return
 
     # 4. Извлечение данных сообщения
     sender = message.get("sender", {})
     body = message.get("body", {})
     user_id = int(sender.get("user_id"))
     user_text = body.get("text", "")
+    
+    # 4.1 Дедупликация сообщений по mid
+    mid = body.get("mid")
+    if mid:
+        from global_state import is_message_processed
+        if is_message_processed(mid):
+            logger.info(f"Пропущено дублирующееся сообщение: {mid}")
+            return
+    else:
+        logger.warning(f"Сообщение без mid")
 
     # 5. Фильтр ботов
     if sender.get("is_bot"):
@@ -285,7 +313,8 @@ async def process_update(
     try:
         reply_text = await bot_logic.handle_message(request, user_text, sender)
 
-        if not reply_text:
+        # None означает ошибку, пустая строка "" означает успех без ответа
+        if reply_text is None:
             logger.error(
                 f"Пустой ответ для пользователя: {user_id} "
                 f"для запроса: {user_text}"
@@ -295,7 +324,9 @@ async def process_update(
             )
             return
 
-        await max_api.send_message(user_id, reply_text, format="markdown")
+        # Отправляем ответ только если он не пустой
+        if reply_text:
+            await max_api.send_message(user_id, reply_text, format="markdown")
     except Exception as e:
         logger.error(f"Ошибка при обработке сообщения: {e}", exc_info=True)
         await max_api.send_message(user_id, f"Произошла ошибка: {str(e)}")

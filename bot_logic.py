@@ -111,7 +111,7 @@ HANDLERS: dict[str, ModeHandler] = {
     "mentor":      _MentorHandlerWrapper(),
     "edit":        EditHandler(),
     "rag":         RagHandler(),
-    "image":       ImageHandler(),
+    "image":       ImageHandler("openai_client", "gpt-image-2", "OpenAI клиент не настроен."),
 }
 
 

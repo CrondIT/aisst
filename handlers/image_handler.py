@@ -20,9 +20,21 @@ from handlers.base import ModeHandler
 
 class ImageHandler(ModeHandler):
     """
-    Обработка режима image 
-    генерация и редактирование изображений через Gemini.
+    Обработка режима image.
+    Генерация и редактирование изображений через LLM-клиент (OpenAI, Gemini и т.д.).
+    Параметризован: client_attr — имя атрибута на app.state,
+    model_name — модель для генерации, error_msg — текст при отсутствии клиента.
     """
+
+    def __init__(
+        self,
+        client_attr: str = "gemini_client",
+        model_name: str = "gemini-3.1-flash-image-preview",
+        error_msg: str = "Клиент изображений не настроен.",
+    ):
+        self.client_attr = client_attr
+        self.model_name = model_name
+        self.error_msg = error_msg
 
     async def handle(
         self,
@@ -31,9 +43,9 @@ class ImageHandler(ModeHandler):
         sender: dict,
     ) -> str | None:
         user_id = int(sender.get("user_id"))
-        gemini_client = getattr(request.app.state, "gemini_client", None)
-        if gemini_client is None:
-            return "Gemini клиент не настроен."
+        client = getattr(request.app.state, self.client_attr, None)
+        if client is None:
+            return self.error_msg
 
         user_text = user_text.strip()
         if not user_text:
@@ -68,8 +80,9 @@ class ImageHandler(ModeHandler):
 
         logger.info(
             f"image_handler: user_id={user_id}, "
+            f"клиент={self.client_attr}, модель={self.model_name}, "
             f"операция={operation_type}, "
-            f"изображений={len(image_paths)}"
+            f"входных_изображений={len(image_paths)}"
         )
 
         await max_api.send_message(
@@ -79,26 +92,27 @@ class ImageHandler(ModeHandler):
         )
 
         try:
-            image_bytes, text_response = await gemini_client.generate_image(
+            image_bytes, text_response = await client.generate_image(
                 image_paths=image_paths,
                 prompt=user_text,
+                model=self.model_name,
             )
         except Exception as e:
             error_msg = str(e)
             if "timeout" in error_msg.lower():
-                logger.warning(f"Gemini timeout для user_id={user_id}")
+                logger.warning(f"Timeout для user_id={user_id}")
                 return (
                     "⏰ Время ожидания истекло. "
                     "Попробуйте снова с более простым запросом."
                 )
-            logger.error(f"Ошибка generate_image: {e}", exc_info=True)
+            logger.error(f"Ошибка generate_image: {error_msg}", exc_info=True)
             return f"⚠️ Ошибка: {error_msg[:300]}"
 
         if text_response is not None:
             await max_api.send_message(user_id, text_response)
             self._cleanup_old_files(image_paths, edit_data=None)
             set_user_edit_queue(user_id, [])
-            return None
+            return ""  # Пустая строка означает успех без дополнительного ответа
 
         if image_bytes is not None:
             os.makedirs(TEMP_DIR, exist_ok=True)
@@ -153,7 +167,7 @@ class ImageHandler(ModeHandler):
             clear_user_pending_delete(user_id)
 
             await db.add_billing(user_id, "image", user_text, 0, 10)
-            return None
+            return ""  # Пустая строка означает успех без дополнительного ответа
 
         return "Не удалось получить результат от модели."
 
