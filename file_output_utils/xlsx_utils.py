@@ -2,6 +2,7 @@
 
 import io
 import json
+import re
 import xlsxwriter
 
 # Константы для формата страницы и полей (в миллиметрах)
@@ -448,7 +449,17 @@ async def send_xlsx_response(user_id: int, reply: str):
 
         cleaned_reply = cleaned_reply.strip()
 
-        data = json.loads(cleaned_reply)
+        # Исправляем JSON: добавляем кавычки к названиям полей без них
+        cleaned_reply = re.sub(
+            r'(\{|\,)\s*([a-zA-Z_]\w*)\s*:',
+            r'\1"\2":',
+            cleaned_reply,
+        )
+        # Удаляем запятые перед ] и }
+        cleaned_reply = re.sub(r',\s*\]', ']', cleaned_reply)
+        cleaned_reply = re.sub(r',\s*\}', '}', cleaned_reply)
+
+        data = json.loads(cleaned_reply, strict=False)
         xlsx_io = io.BytesIO()
         renderer = XlsxRenderer()
         renderer.render(data, xlsx_io)

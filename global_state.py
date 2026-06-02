@@ -238,9 +238,29 @@ SYSTEM_PROMPTS = {
 }
 
 RTF_PROMPT = """
-    Верни ТОЛЬКО валидныйr rtf без пояснений.
-    Не используй markdown, только rtf.
-    Не включай тройные кавычки в значениях.
+    Верни ТОЛЬКО валидный JSON без пояснений.
+    Не используй markdown, только JSON.
+    Все названия полей и строковые значения в двойных кавычках.
+    Строгая схема:
+    {
+        "meta": {"title": "Заголовок документа", "hide_title": false},
+        "content": [
+            {
+                "type": "paragraph",
+                "text": "Текст абзаца",
+                "bold": false,
+                "italic": false,
+                "color": "red",
+                "font_size": 24,
+                "indent_first_line": true,
+                "alignment": "left"
+            }
+        ]
+    }
+    Поддерживаемые type: "paragraph", "heading".
+    Поддерживаемые color: "red", "blue", "black", "green", "navy", "purple", "orange", "gray", "brown", "gold", "pink", "coral", "maroon", "teal", "darkgray".
+    indent_first_line=true добавляет красную строку.
+    alignment: "left", "center", "right", "justify".
 """
 
 
