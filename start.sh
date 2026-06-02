@@ -17,6 +17,11 @@ if pgrep -f "rag_worker" > /dev/null 2>&1; then
     pkill -f "rag_worker" || true
     sleep 1
 fi
+if pgrep -f "image_worker" > /dev/null 2>&1; then
+    echo "⚠️  Остановка старых Image Worker..."
+    pkill -f "image_worker" || true
+    sleep 1
+fi
 if pgrep -f "redis_listener" > /dev/null 2>&1; then
     echo "⚠️  Остановка старых Redis Listener..."
     pkill -f "redis_listener" || true
@@ -45,6 +50,12 @@ $PYTHON -m rag_chain.rag_worker &
 RAG_PID=$!
 echo "RAG Worker запущен (PID: $RAG_PID)"
 
+# Запуск Image Worker (фоновый процесс)
+echo "Запуск Image Worker..."
+$PYTHON image_worker.py &
+IMAGE_PID=$!
+echo "Image Worker запущен (PID: $IMAGE_PID)"
+
 # Запуск Redis Listener (для уведомлений)
 echo "Запуск Redis Listener..."
 $PYTHON -m redis_utils.redis_listener &
@@ -70,12 +81,13 @@ echo ""
 echo "=========================================="
 echo "Все компоненты запущены:"
 echo "  - RAG Worker:      $RAG_PID"
+echo "  - Image Worker:    $IMAGE_PID"
 echo "  - Redis Listener:  $LISTENER_PID"
 echo "  - Gunicorn:        $GUNICORN_PID"
 echo "=========================================="
 echo ""
 echo "Для остановки всех процессов:"
-echo "  kill $RAG_PID $LISTENER_PID $GUNICORN_PID"
+echo "  kill $RAG_PID $IMAGE_PID $LISTENER_PID $GUNICORN_PID"
 echo ""
 
 # Ожидание сигнала завершения

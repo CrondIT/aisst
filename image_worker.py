@@ -1,0 +1,290 @@
+"""
+Image Worker - обработчик очереди задач для генерации/редактирования изображений.
+Запускается как отдельный процесс для асинхронной обработки долгих запросов к OpenAI.
+"""
+
+import asyncio
+import logging
+import os
+import sys
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения
+load_dotenv()
+
+# Инициализируем логирование
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("image_worker.log", encoding="utf-8", mode="a"),
+    ],
+)
+logger = logging.getLogger("image_worker")
+
+# Импорт после настройки логирования
+from redis_utils import RedisQueue, RedisQueueError
+from ai_models import OpenAIClient
+import max_api
+import db as db_module
+from global_state import (
+    OPENAI_API_KEY_IMAGE,
+    TEMP_DIR,
+    get_user_edit_data,
+    set_user_edit_data,
+    set_user_edit_queue,
+    clear_user_pending_delete,
+)
+
+
+# Глобальный клиент OpenAI (инициализируется один раз)
+openai_client = None
+
+
+def init_openai_client():
+    """Инициализирует OpenAI клиент для генерации изображений."""
+    global openai_client
+    if not OPENAI_API_KEY_IMAGE:
+        logger.error("❌ OPENAI_API_KEY_IMAGE не задан в .env")
+        raise RuntimeError("OPENAI_API_KEY_IMAGE отсутствует")
+    
+    openai_client = OpenAIClient(api_key=OPENAI_API_KEY_IMAGE)
+    logger.info("✅ OpenAI клиент инициализирован")
+
+
+async def process_image_task(task_data: dict) -> dict:
+    """
+    Обрабатывает одну задачу генерации/редактирования изображения.
+
+    Args:
+        task_data: Словарь с полями:
+            - user_id: ID пользователя
+            - prompt: текстовый запрос
+            - model: модель (gpt-image-2)
+            - size: размер (1024x1024)
+            - image_paths: список путей к файлам (для редактирования)
+            - operation: "генерация" или "редактирование"
+
+    Returns:
+        Словарь с результатом:
+            - status: 'completed' или 'failed'
+            - user_id: ID пользователя
+            - error: текст ошибки (при неудаче)
+    """
+    user_id = task_data.get("user_id")
+    prompt = task_data.get("prompt", "")
+    model = task_data.get("model", "gpt-image-2")
+    size = task_data.get("size", "1024x1024")
+    image_paths = task_data.get("image_paths", [])
+    operation = task_data.get("operation", "генерация")
+
+    if not user_id or not prompt:
+        logger.error(f"Неполные данные задачи: {task_data}")
+        return {
+            "status": "failed",
+            "error": "Недостаточно данных для обработки",
+            "user_id": user_id,
+        }
+
+    logger.info(
+        f"Начало обработки: user_id={user_id}, "
+        f"операция={operation}, изображений={len(image_paths)}"
+    )
+
+    try:
+        # Генерируем/редактируем изображение через OpenAI
+        image_bytes, text_response = await openai_client.generate_image(
+            image_paths=image_paths,
+            prompt=prompt,
+            model=model,
+            n=1,
+            size=size,
+        )
+
+        # Если модель вернула текстовый ответ вместо изображения
+        if text_response is not None:
+            await max_api.send_message(user_id, text_response)
+            # Очищаем временные файлы
+            _cleanup_old_files(image_paths)
+            set_user_edit_queue(user_id, [])
+            
+            return {
+                "status": "completed",
+                "user_id": user_id,
+            }
+
+        # Если получено изображение
+        if image_bytes is not None:
+            os.makedirs(TEMP_DIR, exist_ok=True)
+            new_file_path = os.path.join(TEMP_DIR, f"img_{user_id}.jpg")
+            old_edit_data = get_user_edit_data(user_id)
+
+            # Формируем подпись
+            prefix = (
+                "Сгенерировано по запросу: "
+                if not image_paths
+                else "Отредактировано по запросу: "
+            )
+            caption = prefix + prompt[:500]
+
+            # Отправляем изображение пользователю
+            result = await max_api.send_generated_image(
+                user_id=user_id,
+                image_bytes=image_bytes,
+                caption=caption,
+            )
+
+            if result != 200:
+                logger.error(f"Ошибка отправки изображения: status={result}")
+                await max_api.send_message(
+                    user_id,
+                    "⚠️ Изображение создано, но не удалось отправить.",
+                )
+                return {
+                    "status": "failed",
+                    "error": f"Не удалось отправить изображение: status={result}",
+                    "user_id": user_id,
+                }
+
+            # Сохраняем путь к новому изображению
+            with open(new_file_path, "wb") as f:
+                f.write(image_bytes)
+            last_edited = old_edit_data.get("last_image")
+            set_user_edit_data(user_id, {"last_image": new_file_path})
+
+            # Удаляем старый файл
+            if last_edited and os.path.exists(last_edited):
+                try:
+                    os.remove(last_edited)
+                except OSError:
+                    pass
+
+            # Очищаем очередь и временные файлы исходных изображений
+            _cleanup_old_files(image_paths)
+            set_user_edit_queue(user_id, [])
+            clear_user_pending_delete(user_id)
+
+            # Логируем биллинг
+            await db_module.add_billing(user_id, "image", prompt, 0, 10)
+
+            logger.info(f"✅ Задача выполнена для user_id={user_id}")
+            return {
+                "status": "completed",
+                "user_id": user_id,
+            }
+
+        # Если ни изображения, ни текста не получено
+        error_msg = "Не удалось получить результат от модели"
+        await max_api.send_message(user_id, f"⚠️ {error_msg}")
+        return {
+            "status": "failed",
+            "error": error_msg,
+            "user_id": user_id,
+        }
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Ошибка обработки задачи: {e}", exc_info=True)
+        
+        # Уведомляем пользователя об ошибке
+        await max_api.send_message(
+            user_id,
+            f"⚠️ Ошибка при генерации изображения:\n{error_msg[:200]}"
+        )
+        
+        return {
+            "status": "failed",
+            "error": error_msg,
+            "user_id": user_id,
+        }
+
+
+def _cleanup_old_files(image_paths: list[str]) -> None:
+    """Удаляет временные файлы исходных изображений."""
+    for path in image_paths:
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+                logger.debug(f"Удалён временный файл: {path}")
+            except OSError as e:
+                logger.warning(f"Не удалось удалить файл {path}: {e}")
+
+
+async def run_worker():
+    """Основной цикл воркера."""
+    try:
+        # Инициализация
+        init_openai_client()
+        queue = RedisQueue()
+        logger.info("Image Worker запущен, слушаю очереди image_gen и image_edit...")
+
+        # Инициализируем БД для биллинга
+        await db_module.create_database()
+
+        while True:
+            try:
+                # Получаем задачу из очередей (блокирующий вызов с таймаутом 5 сек)
+                task = queue.dequeue(
+                    queue_types=["image_gen", "image_edit"],
+                    timeout=5,
+                    priority_aware=True
+                )
+
+                if task:
+                    task_id = task.get("id", "unknown")
+                    task_type = task.get("type", "image_gen")
+                    logger.info(f"📥 Получена задача {task_id[:8]}... (тип: {task_type})")
+
+                    try:
+                        # Обрабатываем задачу
+                        result = await process_image_task(task.get("data", {}))
+                        
+                        # Публикуем результат (для redis_listener)
+                        queue.publish_result(task_id, result, task_type="image")
+
+                        if result.get("status") == "completed":
+                            logger.info(
+                                f"✅ Задача {task_id[:8]}... выполнена "
+                                f"для user_id={result.get('user_id')}"
+                            )
+                        else:
+                            logger.error(
+                                f"❌ Задача {task_id[:8]}... провалена: "
+                                f"{result.get('error')}"
+                            )
+
+                    except Exception as e:
+                        logger.exception(
+                            f"Ошибка обработки задачи {task_id[:8]}...: {e}"
+                        )
+                        queue.publish_result(task_id, {
+                            "status": "failed",
+                            "error": str(e),
+                            "user_id": task.get("data", {}).get("user_id"),
+                        }, task_type="image")
+
+            except RedisQueueError as e:
+                logger.error(f"Ошибка Redis: {e}")
+                await asyncio.sleep(5)
+
+            except Exception as e:
+                logger.exception(f"Неожиданная ошибка в цикле: {e}")
+                await asyncio.sleep(1)
+
+    except KeyboardInterrupt:
+        logger.info("Получен сигнал завершения, останавливаюсь...")
+    except Exception as e:
+        logger.exception(f"Критическая ошибка воркера: {e}")
+        raise
+    finally:
+        if openai_client:
+            await openai_client.close()
+        logger.info("Image Worker остановлен")
+
+
+if __name__ == "__main__":
+    logger.info("=" * 50)
+    logger.info("Запуск Image Worker")
+    logger.info("=" * 50)
+    asyncio.run(run_worker())

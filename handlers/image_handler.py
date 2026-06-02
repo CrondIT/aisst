@@ -11,6 +11,7 @@ from global_state import (
     get_user_edit_queue,
     set_user_edit_queue,
     clear_user_pending_delete,
+    enqueue_task,
     TEMP_DIR,
     MAX_REF_IMAGES,
 )
@@ -43,6 +44,8 @@ class ImageHandler(ModeHandler):
         sender: dict,
     ) -> str | None:
         user_id = int(sender.get("user_id"))
+        
+        # Проверяем наличие клиента (для валидации конфигурации)
         client = getattr(request.app.state, self.client_attr, None)
         if client is None:
             return self.error_msg
@@ -51,7 +54,8 @@ class ImageHandler(ModeHandler):
         if not user_text:
             return "Опишите изображение, которое хотите создать или изменить."
 
-        operation_type = "редактирование"
+        operation_type = "генерация"
+        queue_type = "image_gen"
         image_paths = []
 
         # Собираем изображения из очереди
@@ -68,11 +72,11 @@ class ImageHandler(ModeHandler):
             last_edited = edit_data.get("last_image")
             if last_edited and os.path.exists(last_edited):
                 image_paths.append(last_edited)
-        else:
-            operation_type = "редактирование"
 
-        if not image_paths:
-            operation_type = "генерация"
+        # Определяем тип операции
+        if image_paths:
+            operation_type = "редактирование"
+            queue_type = "image_edit"
 
         # Ограничиваем количество изображений
         if len(image_paths) > MAX_REF_IMAGES:
@@ -85,91 +89,39 @@ class ImageHandler(ModeHandler):
             f"входных_изображений={len(image_paths)}"
         )
 
+        # Формируем данные задачи для воркера
+        task_data = {
+            "user_id": user_id,
+            "prompt": user_text,
+            "model": self.model_name,
+            "size": "1024x1024",
+            "image_paths": image_paths,
+            "operation": operation_type,
+            "client_attr": self.client_attr,
+        }
+
+        # Ставим задачу в очередь Redis
+        try:
+            task_id = enqueue_task(queue_type, task_data, priority="normal")
+            logger.info(f"Задача {task_id[:8]}... поставлена в очередь {queue_type}")
+        except Exception as e:
+            logger.error(f"Ошибка постановки задачи в очередь: {e}", exc_info=True)
+            return f"⚠️ Ошибка: не удалось поставить задачу в очередь. {str(e)[:100]}"
+
+        # Отправляем пользователю подтверждение
         await max_api.send_message(
             user_id,
-            f"🎨 {operation_type.capitalize()} изображения начата...\n"
-            f"Запрос: {user_text[:200]}"
+            f"🎨 {operation_type.capitalize()} изображения запущена...\n"
+            f"Запрос: {user_text[:200]}\n"
+            f"⏳ Ожидайте результат (обычно 30-60 секунд)."
         )
 
-        try:
-            image_bytes, text_response = await client.generate_image(
-                image_paths=image_paths,
-                prompt=user_text,
-                model=self.model_name,
-            )
-        except Exception as e:
-            error_msg = str(e)
-            if "timeout" in error_msg.lower():
-                logger.warning(f"Timeout для user_id={user_id}")
-                return (
-                    "⏰ Время ожидания истекло. "
-                    "Попробуйте снова с более простым запросом."
-                )
-            logger.error(f"Ошибка generate_image: {error_msg}", exc_info=True)
-            return f"⚠️ Ошибка: {error_msg[:300]}"
-
-        if text_response is not None:
-            await max_api.send_message(user_id, text_response)
-            self._cleanup_old_files(image_paths, edit_data=None)
-            set_user_edit_queue(user_id, [])
-            return ""  # Пустая строка означает успех без дополнительного ответа
-
-        if image_bytes is not None:
-            os.makedirs(TEMP_DIR, exist_ok=True)
-            new_file_path = os.path.join(TEMP_DIR, f"img_{user_id}.jpg")
-            old_edit_data = get_user_edit_data(user_id)
-
-            try:
-                prefix = (
-                    "Сгенерировано по запросу: "
-                    if not image_paths
-                    else "Отредактировано по запросу: "
-                )
-                caption = prefix + user_text[:500]
-
-                result = await max_api.send_generated_image(
-                    user_id=user_id,
-                    image_bytes=image_bytes,
-                    caption=caption,
-                )
-
-                if result != 200:
-                    logger.error(
-                        f"Ошибка отправки изображения: status={result}"
-                    )
-                    await max_api.send_message(
-                        user_id,
-                        "⚠️ Изображение создано, но не удалось отправить.",
-                    )
-            except Exception as e:
-                await max_api.send_message(
-                    user_id,
-                    f"⚠️ Ошибка при отправке изображения: {str(e)}",
-                )
-                logger.error(f"Ошибка отправки изображения: {e}")
-            else:
-                # Сохраняем путь к новому изображению
-                with open(new_file_path, "wb") as f:
-                    f.write(image_bytes)
-                last_edited = old_edit_data.get("last_image")
-                set_user_edit_data(user_id, {"last_image": new_file_path})
-
-                # Удаляем старый файл
-                if last_edited and os.path.exists(last_edited):
-                    try:
-                        os.remove(last_edited)
-                    except OSError:
-                        pass
-
-            # Очищаем очередь и временные файлы исходных изображений
-            self._cleanup_old_files(image_paths, edit_data=old_edit_data)
-            set_user_edit_queue(user_id, [])
-            clear_user_pending_delete(user_id)
-
-            await db.add_billing(user_id, "image", user_text, 0, 10)
-            return ""  # Пустая строка означает успех без дополнительного ответа
-
-        return "Не удалось получить результат от модели."
+        # Очистка очереди изображений — воркер использует сохранённые пути
+        # но не очищаем сразу, т.к. воркер ещё не обработал
+        # Очистка будет в воркере после успешной обработки
+        
+        # Возвращаем пустую строку — задача поставлена в очередь, ответ уже отправлен
+        return ""
 
     @staticmethod
     def _cleanup_old_files(

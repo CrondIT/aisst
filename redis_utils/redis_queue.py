@@ -197,7 +197,7 @@ class RedisQueue:
             task: Данные задачи или None если очередь пуста
         """
         if queue_types is None:
-            queue_types = ["chat", "file", "image:gen", "image:edit"]
+            queue_types = ["chat", "file", "rag", "image_gen", "image_edit"]
 
         # Формируем список очередей для опроса
         queues = []
@@ -284,8 +284,9 @@ class RedisQueue:
         for queue_type in [
             "chat",
             "file",
-            "image:gen",
-            "image:edit",
+            "rag",
+            "image_gen",
+            "image_edit",
             "high",
             "low",
         ]:
@@ -651,7 +652,7 @@ class RedisQueue:
             {"task_id": task_id, "user_id": user_id}
         )
 
-    def publish_result(self, task_id: str, result: dict):
+    def publish_result(self, task_id: str, result: dict, task_type: str = "rag"):
         """
         Публикует результат задачи с расширенной информацией.
 
@@ -662,17 +663,18 @@ class RedisQueue:
                 - user_id: ID пользователя
                 - result: текст результата (при успехе)
                 - error: текст ошибки (при неудаче)
+            task_type: Тип задачи (rag, image, audio, и т.д.)
         """
         notification = {
             "task_id": task_id,
-            "task_type": "rag",
+            "task_type": task_type,
             "status": result.get("status"),
             "user_id": result.get("user_id"),
             "result": result.get("result"),
             "error": result.get("error"),
         }
         self.publish_notification(REDIS_NOTIFICATION_CHANNEL, notification)
-        logger.info(f"📢 Результат задачи {task_id} опубликован")
+        logger.info(f"📢 Результат задачи {task_id} ({task_type}) опубликован")
 
     def subscribe_to_notifications(self, callback=None):
         """

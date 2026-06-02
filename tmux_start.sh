@@ -23,6 +23,11 @@ if pgrep -f "rag_worker" > /dev/null 2>&1; then
     pkill -f "rag_worker" || true
     sleep 1
 fi
+if pgrep -f "image_worker" > /dev/null 2>&1; then
+    echo "⚠️  Остановка старых Image Worker..."
+    pkill -f "image_worker" || true
+    sleep 1
+fi
 if pgrep -f "redis_listener" > /dev/null 2>&1; then
     echo "⚠️  Остановка старых Redis Listener..."
     pkill -f "redis_listener" || true
@@ -45,6 +50,10 @@ fi
 echo "Создание tmux-сессии '$SESSION_NAME'..."
 tmux new-session -d -s "$SESSION_NAME" -n "rag_worker" \
     "$PYTHON -m rag_chain.rag_worker"
+
+# Добавляем окно для image_worker
+tmux new-window -t "$SESSION_NAME" -n "image_worker" \
+    "$PYTHON image_worker.py"
 
 # Добавляем окно для redis_listener
 tmux new-window -t "$SESSION_NAME" -n "redis_listener" \
@@ -72,8 +81,9 @@ echo "=========================================="
 echo ""
 echo "Окна:"
 echo "  1. rag_worker      — обработка RAG задач"
-echo "  2. redis_listener  — слушатель результатов"
-echo "  3. gunicorn        — веб-сервер"
+echo "  2. image_worker    — генерация изображений"
+echo "  3. redis_listener  — слушатель результатов"
+echo "  4. gunicorn        — веб-сервер"
 echo ""
 echo "Управление:"
 echo "  tmux attach -t $SESSION_NAME     — подключиться"

@@ -144,11 +144,13 @@ class RedisListener:
         Args:
             task_id: Идентификатор задачи
             user_id: ID пользователя
-            task_type: Тип задачи (rag, audio, и т.д.)
+            task_type: Тип задачи (rag, image, audio, и т.д.)
             data: Полные данные уведомления
         """
         if task_type == "rag":
             await self._process_rag_result(task_id, user_id, data)
+        elif task_type == "image":
+            await self._process_image_result(task_id, user_id, data)
         else:
             # Для остальных задач используем старый метод
             await self._process_task_result(task_id, user_id)
@@ -183,6 +185,41 @@ class RedisListener:
         else:
             logger.warning(
                 f"⚠️ Неизвестный статус RAG задачи: {status}"
+            )
+
+    async def _process_image_result(
+        self, task_id: str, user_id: int, data: dict
+    ):
+        """
+        Обрабатывает результат задачи генерации изображения.
+
+        Args:
+            task_id: Идентификатор задачи
+            user_id: ID пользователя
+            data: Данные уведомления с результатом
+        """
+        status = data.get("status")
+        error = data.get("error")
+
+        if status == "completed":
+            logger.info(
+                f"✅ Image задача {task_id[:8]}... выполнена для user_id={user_id}"
+            )
+            # Изображение уже отправлено воркером через send_generated_image()
+            # Дополнительное уведомление не требуется
+            # Можно добавить, если нужно:
+            # await self._send_max_message(user_id, "✅ Изображение готово!")
+        elif status == "failed":
+            logger.error(
+                f"❌ Image задача {task_id[:8]}... провалена: {error}"
+            )
+            # Воркер уже отправил сообщение об ошибке пользователю
+            # но можем продублировать для надёжности:
+            # message = f"❌ Ошибка генерации изображения:\n{error[:200]}"
+            # await self._send_max_message(user_id, message)
+        else:
+            logger.warning(
+                f"⚠️ Неизвестный статус Image задачи: {status}"
             )
 
     async def _send_max_message(self, user_id: int, text: str):

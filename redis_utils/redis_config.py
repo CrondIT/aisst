@@ -40,6 +40,7 @@ REDIS_TTL = {
     "user_files": int(os.getenv("REDIS_TTL_USER_FILES", 1800)),  # 30 минут
     "user_edit": int(os.getenv("REDIS_TTL_USER_EDIT", 1800)),  # 30 минут
     "task_result": int(os.getenv("REDIS_TTL_TASK_RESULT", 1800)),  # 30 мин для RAG
+    "image_result": int(os.getenv("REDIS_TTL_IMAGE_RESULT", 600)),  # 10 мин для изображений
     "rate_limit": int(os.getenv("REDIS_TTL_RATE_LIMIT", 60)),  # 1 минута
 }
 
@@ -48,6 +49,8 @@ QUEUE_CONFIG = {
     "rag": os.getenv("QUEUE_RAG", "rag"),  # Загрузка файлов в RAG
     "audio": os.getenv("QUEUE_AUDIO", "audio"),  # Транскрибация аудио
     "file_process": os.getenv("QUEUE_FILE_PROCESS", "file_process"),  # Обработка файлов
+    "image_gen": os.getenv("QUEUE_IMAGE_GEN", "image_gen"),  # Генерация изображений
+    "image_edit": os.getenv("QUEUE_IMAGE_EDIT", "image_edit"),  # Редактирование изображений
     "high_priority": os.getenv("QUEUE_HIGH_PRIORITY", "high"),  # Высокий приоритет
     "low_priority": os.getenv("QUEUE_LOW_PRIORITY", "low"),  # Низкий приоритет
 }
