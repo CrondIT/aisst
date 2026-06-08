@@ -284,7 +284,7 @@ async def handle_file(file_name: str, sender: dict) -> str | None:
             except Exception as e:
                 logger.error(f"Не удалось добавить задачу в очередь: {e}")
         result = await save_to_vector_db(
-            file_path=file_name, sender=sender, model_name="Embeddings"
+            file_path=file_name, sender=sender,
         )
         await db.add_billing(
             user_id, user_mode, "save_to_vector_db", 0, 5, notes=result

@@ -5,11 +5,7 @@ from typing import Optional
 
 from langchain_gigachat.embeddings import GigaChatEmbeddings
 # from langchain_community.embeddings.gigachat import GigaChatEmbeddings
-from global_state import (
-    GIGACHAT_API_KEY,
-    GIGACHAT_SCOPE,
-    RUS_TRUSTED_ROOT_CA_PEM
-    )
+from global_state import GIGACHAT_CONFIG, MODELS
 # from langchain.chains import RetrievalQA
 
 _giga_embeddings = None
@@ -28,15 +24,15 @@ class SearchResult:
     sources: list[SearchSource]
 
 
-def get_giga_embeddings(model_name: str = "Embeddings") -> GigaChatEmbeddings:
+def get_giga_embeddings(model_name: str | None = None) -> GigaChatEmbeddings:
     """Ленивая инициализация GigaChatEmbeddings (синглтон)."""
     global _giga_embeddings
     if _giga_embeddings is None:
         _giga_embeddings = GigaChatEmbeddings(
-            credentials=GIGACHAT_API_KEY,
-            scope=GIGACHAT_SCOPE,
-            model=model_name,
-            ca_bundle_file=RUS_TRUSTED_ROOT_CA_PEM,
+            credentials=GIGACHAT_CONFIG.credentials,
+            scope=GIGACHAT_CONFIG.scope,
+            model=model_name or MODELS["embeddings"],
+            ca_bundle_file=GIGACHAT_CONFIG.ca_bundle_file,
         )
     return _giga_embeddings
 

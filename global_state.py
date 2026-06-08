@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 from collections import deque
+from dataclasses import dataclass
 from dotenv import load_dotenv
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -96,6 +97,10 @@ OPENAI_API_KEY_CHAT = os.getenv("OPENAI_API_KEY")
 OPENAI_API_KEY_IMAGE = os.getenv("OPENAI_API_KEY_IMAGE")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# Имена моделей для GigaChat (вынесены в .env для централизованной смены)
+MODEL_RAG_LLM = os.getenv("MODEL_RAG_LLM", "GigaChat")         # LangChain LLM в RAG
+MODEL_EMBEDDINGS = os.getenv("MODEL_EMBEDDINGS", "Embeddings")  # GigaChat Embeddings
+
 # Модели для разных режимов
 MODELS = {
     "chat": "gpt-5.2-chat-latest",
@@ -105,7 +110,23 @@ MODELS = {
     "gigachatpro": "GigaChat",
     "chatgpt": "gpt-5.2-chat-latest",   # режим ChatGPT
     "gemini": "gemini-2.5-pro",          # режим Gemini
+    "rag_llm": MODEL_RAG_LLM,           # LangChain GigaChat для RAG
+    "embeddings": MODEL_EMBEDDINGS,     # GigaChat Embeddings
 }
+
+# ─── Единый конфиг подключения к GigaChat ───
+@dataclass(frozen=True)
+class GigaChatConfig:
+    """Single point of truth для credentials GigaChat."""
+    credentials: str
+    scope: str
+    ca_bundle_file: str | None
+
+GIGACHAT_CONFIG = GigaChatConfig(
+    credentials=GIGACHAT_API_KEY,
+    scope=GIGACHAT_SCOPE,
+    ca_bundle_file=RUS_TRUSTED_ROOT_CA_PEM,
+)
 
 # ─── Настройки webhook ───
 # URL, на который MAX будет присылать обновления (строго HTTPS, порт 443)

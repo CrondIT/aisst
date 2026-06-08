@@ -245,7 +245,7 @@ async def _add_batch_with_retry(
 async def save_to_vector_db(
         file_path,
         sender: dict,
-        model_name: str = "Embeddings",
+        model_name: str | None = None,
         persist_dir: str = GUEST_RAG_DIR,
 ):
     """
@@ -344,7 +344,7 @@ async def save_to_vector_db(
 
 def get_all_filenames_from_vector_db(
         persist_dir: str = GUEST_RAG_DIR,
-        model_name: str = "Embeddings",
+        model_name: str | None = None,
         search_text: str | None = None
 ) -> str:
     """
@@ -397,7 +397,7 @@ def get_all_filenames_from_vector_db(
 def delete_file_from_vector_db(
         file_name: str,
         persist_dir: str = GUEST_RAG_DIR,
-        model_name: str = "Embeddings"
+        model_name: str | None = None
 ) -> str:
     """
     Удаляет документ из векторной базы по точному имени файла.

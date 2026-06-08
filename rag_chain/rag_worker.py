@@ -66,7 +66,6 @@ async def process_rag_task(task_data: dict) -> dict:
         result = await save_to_vector_db(
             file_path=file_path,
             sender=sender,
-            model_name="Embeddings"
         )
         logger.info(f"Задача выполнена: {result}")
         return {

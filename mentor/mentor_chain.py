@@ -125,7 +125,7 @@ def _get_vector_db():
     """Получает инстанс ChromaDB через load_from_file."""
     from rag_chain import check_vector_db
     
-    embeddings = get_giga_embeddings(model_name="Embeddings")
+    embeddings = get_giga_embeddings()
     vector_db = check_vector_db(persist_dir=GUEST_RAG_DIR, embeddings=embeddings)
     return vector_db
 

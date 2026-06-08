@@ -217,7 +217,7 @@ def _get_rag_chain(
     if _rag_chain is None or _rag_chain_params != current_params:
         from .load_from_file import check_vector_db
 
-        embeddings = get_giga_embeddings(model_name="Embeddings")
+        embeddings = get_giga_embeddings()
         vector_db = check_vector_db(persist_dir=GUEST_RAG_DIR, embeddings=embeddings)
 
         retriever = vector_db.as_retriever(

@@ -3,12 +3,11 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from global_state import (
-    GIGACHAT_API_KEY,
+    GIGACHAT_CONFIG,
+    MODELS,
     WEBHOOK_URL,
     WEBHOOK_SECRET,
-    GIGACHAT_SCOPE,
     ADMIN_API_TOKEN,
-    RUS_TRUSTED_ROOT_CA_PEM,
     OPENAI_API_KEY_CHAT,
     GEMINI_API_KEY,
 )
@@ -62,23 +61,23 @@ async def lifespan(app: FastAPI):
 
     # ─── GigaChat ───
     giga_client = None
-    if not GIGACHAT_API_KEY:
+    if not GIGACHAT_CONFIG.credentials:
         logger.warning("GIGACHAT_API_KEY не задан. Режим GigaChat недоступен.")
     else:
         giga_client = GigaChat(
-            credentials=GIGACHAT_API_KEY,
-            scope=GIGACHAT_SCOPE,
-            ca_bundle_file=RUS_TRUSTED_ROOT_CA_PEM,
+            credentials=GIGACHAT_CONFIG.credentials,
+            scope=GIGACHAT_CONFIG.scope,
+            ca_bundle_file=GIGACHAT_CONFIG.ca_bundle_file,
         )
         # Кастомный клиент — для прямых generate()-вызовов
         app.state.giga_client = GigaChatClient(giga_client)
 
         # ─── LangChain-клиент ───  для RAG-цепочки (ask_rag)
         app.state.giga_lc_client = LangChainGigaChat(
-            credentials=GIGACHAT_API_KEY,
-            scope=GIGACHAT_SCOPE,
-            model="GigaChat",                  # можно вынести в .env
-            ca_bundle_file=RUS_TRUSTED_ROOT_CA_PEM,  # путь к сертификату
+            credentials=GIGACHAT_CONFIG.credentials,
+            scope=GIGACHAT_CONFIG.scope,
+            model=MODELS["rag_llm"],
+            ca_bundle_file=GIGACHAT_CONFIG.ca_bundle_file,
         )
 
         logger.info("GigaChat клиенты инициализированы (native + langchain)")
