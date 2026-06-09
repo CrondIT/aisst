@@ -107,7 +107,7 @@ MODELS = {
     "chat": "gpt-5.2-chat-latest",
     "image": "gemini-3.1-flash-image-preview",
     "ai_file": "gpt-5.2-chat-latest",
-    "gigachat": "GigaChat",
+    "aiagent": "GigaChat",
     "gigachatpro": "GigaChat",
     "chatgpt": "gpt-5.2-chat-latest",   # режим ChatGPT
     "gemini": "gemini-2.5-pro",          # режим Gemini
@@ -233,13 +233,7 @@ SYSTEM_PROMPTS = {
         "or when the user explicitly asks for fresh data."
     ),
     "image": ("Ты помогаешь генерировать изображения."),
-    "edit": ("Ты помогаешь редактировать изображения с помощью Gemini."),
-    "ai_file": (
-        "Ты помощник по анализу документов."
-        "Отвечай на вопросы касательно "
-        "содержимого предоставленного файла."
-    ),
-    "gigachat": (
+    "aiagent": (
         "Ты — ассистент-помощник колледжа. Отвечай на вопросы студентов "
         "на основе документов из базы знаний. Если информации нет в документах — "
         "честно говори об этом. Поддерживай историю диалога, учитывай "
@@ -249,10 +243,6 @@ SYSTEM_PROMPTS = {
         "Ты — продвинутый AI-ассистент на базе GigaChat Pro. "
         "Помогаешь пользователям с любыми вопросами, "
         "предоставляя подробные и точные ответы."
-    ),
-    "chatgpt": (
-        "You are a helpful assistant powered by ChatGPT. "
-        "Provide clear, accurate, and detailed responses."
     ),
     "gemini": (
         "You are a helpful assistant powered by Google Gemini. "
@@ -565,7 +555,7 @@ def get_user_mode(user_id: int) -> str:
     else:
         return user_modes.get(user_id, "chat")
     # Дефолтное значение, если Redis недоступен
-    return "gigachat"
+    return "aiagent"
 
 
 def set_user_mode(user_id: int, mode: str):

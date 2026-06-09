@@ -174,7 +174,7 @@ async def process_update(
             logger.info(f"Пропущено дублирующееся сообщение: {mid}")
             return
     else:
-        logger.warning(f"Сообщение без mid")
+        logger.warning("Сообщение без mid")
 
     # 5. Фильтр ботов
     if sender.get("is_bot"):
@@ -298,7 +298,7 @@ async def process_update(
     if user_text.startswith("/"):
         command_parts = user_text.split(maxsplit=1)
         command = command_parts[0].lower()
-        if command == "/start" and permission != 1:
+        if command == "/college" and permission != 1:
             text = "Я Ваш персональный ИИ помощник!"
             await max_api.send_inline_message(user_id, text)
             return

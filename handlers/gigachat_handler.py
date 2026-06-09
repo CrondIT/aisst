@@ -1,4 +1,4 @@
-"""Обработчик режима gigachat (RAG-поиск по документам колледжа)."""
+"""Обработчик режима aiagent (RAG-поиск по документам колледжа)."""
 from fastapi import Request
 
 import db
@@ -15,7 +15,7 @@ from utils import logger
 
 
 class GigachatHandler(ModeHandler):
-    """Обработка режима gigachat — RAG-поиск с историей диалога."""
+    """Обработка режима aiagent — RAG-поиск с историей диалога."""
 
     async def handle(
         self,
@@ -26,7 +26,7 @@ class GigachatHandler(ModeHandler):
         user_id = int(sender.get("user_id"))
 
         # 1. Загружаем контекст
-        context = await get_user_context_async(user_id, "gigachat")
+        context = await get_user_context_async(user_id, "aiagent")
 
         # 2. Добавляем сообщение пользователя
         context.append({"role": "user", "content": user_text})
@@ -46,14 +46,14 @@ class GigachatHandler(ModeHandler):
         context = system_msgs + non_system
 
         # 6. Сохраняем контекст
-        await set_user_context_async(user_id, "gigachat", context)
+        await set_user_context_async(user_id, "aiagent", context)
 
         logger.info(
-            f"gigachat: user_id={user_id}, "
+            f"aiagent: user_id={user_id}, "
             f"сообщений в контексте={len(non_system) // 2}"
         )
 
         # 7. Биллинг
-        await db.add_billing(user_id, "gigachat", user_text, 0, 2)
+        await db.add_billing(user_id, "aiagent", user_text, 0, 2)
 
         return answer

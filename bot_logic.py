@@ -30,17 +30,17 @@ from handlers.image_handler import ImageHandler
 import extract_text_from_file_utils
 
 mode_map = {
-    "/gigachat": (
-        "gigachat",
+    "/aiagent": (
+        "aiagent",
         "Режим: чат с ИИ по документам колледжа"
     ),
     "/gigachatpro": (
         "gigachatpro",
         "Режим: GigaChat Pro"
     ),
-    "/chatgpt": (
-        "chatgpt",
-        "Режим: ChatGPT"
+    "/chat": (
+        "chat",
+        "Режим: Chat"
     ),
     "/gemini": (
         "gemini",
@@ -104,9 +104,9 @@ class _MentorHandlerWrapper:
 
 # Словарь обработчиков режимов
 HANDLERS: dict[str, ModeHandler] = {
-    "gigachat":    GigachatHandler(),
+    "aiagent":    GigachatHandler(),
     "gigachatpro": LlmDirectHandler("giga_client",   "GigaChat",              "gigachatpro", "GigaChat Pro клиент не настроен."),
-    "chatgpt":     LlmDirectHandler("openai_client",  "gpt-5.2-chat-latest",  "chatgpt",     "OpenAI клиент не настроен."),
+    "chat":     LlmDirectHandler("openai_client",  "gpt-5.2-chat-latest",  "chat",     "OpenAI клиент не настроен."),
     "gemini":      LlmDirectHandler("gemini_client",  "gemini-2.5-pro",       "gemini",      "Gemini клиент не настроен."),
     "mentor":      _MentorHandlerWrapper(),
     "edit":        EditHandler(),
@@ -160,7 +160,7 @@ async def handle_command(
     user_data = await db.get_user(user_id)
     # если пользователь гость то разрещен только один режим (для бота ССТ)
     if user_data["permission"] == 1:
-        command = "/gigachat"  
+        command = "/aiagent"  
 
     if command == "/billing":
         if user_data:
@@ -225,7 +225,7 @@ async def handle_message(
     user_id = int(sender.get("user_id"))
     user_mode = get_user_mode(user_id)
     if not user_mode:
-        user_mode = "gigachat"
+        user_mode = "aiagent"
         set_user_mode(user_id, user_mode)
     
     logger.info(
