@@ -39,17 +39,19 @@ class OpenAIClient:
         self,
         messages: list[dict],
         temperature: float = 0.7,
-        max_tokens: int = 4096,
         model: str = "gpt-5.2-chat-latest",
         enable_web_search: bool = True,
     ) -> str:
+        # max_tokens намеренно отсутствует: gpt-5.x Responses API
+        # не принимает max_output_tokens — управление длиной ответа
+        # осуществляется через обрезку контекста на уровне вызывающего кода.
         model_name = model
         logger.info(
             f"OpenAI.chat: модель={model_name}, "
             f"сообщений={len(messages)}, "
-            f"temperature={temperature}, max_tokens={max_tokens}"
+            f"temperature={temperature}"
         )
-         # Инструменты подключаем только если разрешён поиск
+        # Инструменты подключаем только если разрешён поиск
         tools = []
         if enable_web_search:
             tools.append(
