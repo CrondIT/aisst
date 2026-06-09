@@ -12,8 +12,10 @@ from global_state import (
     set_user_edit_queue,
     clear_user_pending_delete,
     enqueue_task,
+    get_queue_size,
     TEMP_DIR,
     MAX_REF_IMAGES,
+    MAX_CONCURRENT_IMAGES,
 )
 from utils import logger
 from handlers.base import ModeHandler
@@ -108,12 +110,21 @@ class ImageHandler(ModeHandler):
             logger.error(f"Ошибка постановки задачи в очередь: {e}", exc_info=True)
             return f"⚠️ Ошибка: не удалось поставить задачу в очередь. {str(e)[:100]}"
 
+        # Определяем позицию в очереди и примерное время ожидания
+        queue_size = get_queue_size("image_gen") + get_queue_size("image_edit")
+        est_seconds = max(30, round((queue_size * 45) / MAX_CONCURRENT_IMAGES))
+        if est_seconds >= 120:
+            est_str = f"~{est_seconds // 60} мин."
+        else:
+            est_str = f"~{est_seconds} сек."
+
         # Отправляем пользователю подтверждение
         await max_api.send_message(
             user_id,
             f"🎨 {operation_type.capitalize()} изображения запущена...\n"
             f"Запрос: {user_text[:200]}\n"
-            f"⏳ Ожидайте результат (обычно 30-60 секунд)."
+            f"📍 Позиция в очереди: {queue_size}\n"
+            f"⏳ Ожидаемое время: {est_str}"
         )
 
         # Очистка очереди изображений — воркер использует сохранённые пути

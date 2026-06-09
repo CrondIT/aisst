@@ -13,7 +13,12 @@ from sqlalchemy import (
     UniqueConstraint,
     Index,
     delete,
+    select,
+    update,
+    text,
+    desc,
 )
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
     AsyncSession,
@@ -33,7 +38,14 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_async_engine(MAX_DB_PATH, echo=False)
+engine = create_async_engine(
+    MAX_DB_PATH,
+    echo=False,
+    # connect_args передаются напрямую в sqlite3.connect() через aiosqlite.
+    # timeout=5 — ожидать до 5 сек при блокировке файла БД другим процессом
+    # (эквивалент PRAGMA busy_timeout=5000, применяется к каждому соединению).
+    connect_args={"timeout": 5},
+)
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
@@ -140,14 +152,18 @@ class UserContext(Base):
 async def create_database():
     """Создает базу данных и таблицы, а также системного пользователя."""
     try:
-        # Создаем базу и таблицы если их не существует
         async with engine.begin() as conn:
+            # WAL-режим сохраняется в файле БД — достаточно установить один раз.
+            # Позволяет нескольким процессам читать одновременно с одним пишущим,
+            # исключая ошибку "database is locked" при параллельных воркерах.
+            await conn.execute(text("PRAGMA journal_mode=WAL"))
+            # NORMAL: fsync только при чекпоинте — баланс надёжности и скорости
+            await conn.execute(text("PRAGMA synchronous=NORMAL"))
+            # Создаём таблицы если их не существует
             await conn.run_sync(Base.metadata.create_all)
 
         # Создание системного пользователя с id=0, если он не существует
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
-
             result = await db.execute(select(User).where(User.id == 0))
             user = result.scalar_one_or_none()
 
@@ -169,8 +185,6 @@ async def check_user(userid: int) -> bool:
     """
     try:
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
-
             result = await db.execute(select(User).where(User.id == userid))
             user = result.scalar_one_or_none()
             return user is not None
@@ -195,8 +209,6 @@ async def create_user(
     """
     try:
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
-
             # Проверяем, не существует ли уже пользователь
             result = await db.execute(select(User).where(User.id == userid))
             existing_user = result.scalar_one_or_none()
@@ -231,8 +243,6 @@ async def get_user(userid: int) -> dict | None:
     """
     try:
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
-
             result = await db.execute(select(User).where(User.id == userid))
             user = result.scalar_one_or_none()
 
@@ -265,17 +275,20 @@ async def add_coins(userid: int, coins: int = 0, giftcoins: int = 0) -> bool:
     """
     try:
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
-
-            result = await db.execute(select(User).where(User.id == userid))
-            user = result.scalar_one_or_none()
-
-            if not user:
+            # Атомарный UPDATE на уровне SQL — нет гонки между воркерами.
+            # UPDATE users SET coins = coins + ?, giftcoins = giftcoins + ?
+            result = await db.execute(
+                update(User)
+                .where(User.id == userid)
+                .values(
+                    coins=User.coins + coins,
+                    giftcoins=User.giftcoins + giftcoins,
+                    coindate=datetime.now(),
+                )
+            )
+            if result.rowcount == 0:
+                # Пользователь не найден — ни одна строка не обновлена
                 return False
-
-            user.coins += coins
-            user.giftcoins += giftcoins
-            user.coindate = datetime.now()
 
             await db.commit()
             return True
@@ -300,33 +313,43 @@ async def add_billing(
     """
     try:
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
-
-            result = await db.execute(select(User).where(User.id == userid))
-            user = result.scalar_one_or_none()
-
-            if not user:
+            # Проверяем существование пользователя
+            exists = await db.scalar(
+                select(func.count(User.id)).where(User.id == userid)
+            )
+            if not exists:
                 return False
 
-            balance = (
-                user.coins + user.giftcoins + inccoins + giftcoins - deccoins
+            # Атомарный UPDATE на уровне SQL — защита от race condition.
+            # Два воркера не потеряют монеты: каждый применяет дельту,
+            # а не перезаписывает прочитанное значение.
+            # SQL: UPDATE users SET coins = coins + ?, giftcoins = giftcoins + ? - ?
+            await db.execute(
+                update(User)
+                .where(User.id == userid)
+                .values(
+                    coins=User.coins + inccoins,
+                    giftcoins=User.giftcoins + giftcoins - deccoins,
+                )
             )
 
-            new_billing = Billing(
+            # Читаем актуальный баланс после UPDATE в рамках той же транзакции.
+            # SQLite гарантирует: SELECT видит собственные незакоммиченные изменения.
+            row = (await db.execute(
+                select(User.coins, User.giftcoins).where(User.id == userid)
+            )).one_or_none()
+            new_balance = (row.coins + row.giftcoins) if row else 0
+
+            db.add(Billing(
                 user_id=userid,
                 usermode=usermode,
                 userprompt=userprompt,
                 inccoins=inccoins,
                 deccoins=deccoins,
                 giftcoins=giftcoins,
-                balance=balance,
+                balance=new_balance,
                 notes=notes,
-            )
-            db.add(new_billing)
-
-            user.coins += inccoins
-            user.giftcoins += giftcoins
-            user.giftcoins -= deccoins
+            ))
 
             await db.commit()
             return True
@@ -345,8 +368,6 @@ async def get_billing_history(
     """
     try:
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select, desc
-
             result = await db.execute(
                 select(Billing)
                 .where(Billing.user_id == userid)
@@ -457,37 +478,32 @@ async def init_default_prompts():
     """
     Инициализирует промпты по умолчанию в базе данных.
     Создаёт записи если их нет, иначе пропускает.
+    Безопасно при параллельном запуске нескольких воркеров (ON CONFLICT DO NOTHING).
     """
     try:
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
-
             for prompt_key, data in DEFAULT_PROMPTS.items():
-                result = await db.execute(
-                    select(Prompt).where(Prompt.prompt_key == prompt_key)
-                )
-                existing = result.scalar_one_or_none()
+                # ON CONFLICT DO NOTHING — если второй воркер успел вставить раньше,
+                # не бросаем IntegrityError, просто пропускаем.
+                # inserted_primary_key is None при конфликте → версию не дублируем.
+                stmt = sqlite_insert(Prompt).values(
+                    prompt_key=prompt_key,
+                    description=data["description"],
+                    current_system_text=data["system"],
+                    current_human_text=data["human"],
+                ).on_conflict_do_nothing(index_elements=["prompt_key"])
+                result = await db.execute(stmt)
+                await db.flush()
 
-                if not existing:
-                    prompt = Prompt(
-                        prompt_key=prompt_key,
-                        description=data["description"],
-                        current_system_text=data["system"],
-                        current_human_text=data["human"],
-                    )
-                    db.add(prompt)
-
-                    await db.flush()
-
+                if result.inserted_primary_key:
                     version = PromptVersion(
-                        prompt_id=prompt.id,
+                        prompt_id=result.inserted_primary_key[0],
                         version_number=1,
                         system_text=data["system"],
                         human_text=data["human"],
                         created_by=0,
                     )
                     db.add(version)
-
                     logger.info(f"Инициализирован промпт: {prompt_key}")
 
             await db.commit()
@@ -500,36 +516,35 @@ async def init_default_prompts():
 async def save_user_context(user_id: int, mode: str, context: list[dict]) -> bool:
     """
     Сохраняет контекст пользователя в БД.
-    Обновляет запись, если она существует, иначе создаёт новую.
+    Использует INSERT ... ON CONFLICT DO UPDATE (UPSERT) — атомарная операция,
+    безопасная при параллельном выполнении несколькими воркерами.
     """
     try:
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
-
-            result = await db.execute(
-                select(UserContext).where(
-                    UserContext.user_id == user_id,
-                    UserContext.mode == mode
-                )
-            )
-            context_record = result.scalar_one_or_none()
-
             context_json = json_module.dumps(context, ensure_ascii=False)
             message_count = len([m for m in context if m.get("role") in ("user", "assistant")])
+            now = datetime.now()
 
-            if context_record:
-                context_record.context_data = context_json
-                context_record.updated_at = datetime.now()
-                context_record.message_count = message_count
-            else:
-                new_context = UserContext(
-                    user_id=user_id,
-                    mode=mode,
-                    context_data=context_json,
-                    message_count=message_count
-                )
-                db.add(new_context)
-
+            # Атомарный UPSERT: INSERT при отсутствии записи, UPDATE при конфликте.
+            # Исключает IntegrityError при параллельной записи двух воркеров
+            # по одному и тому же (user_id, mode).
+            stmt = sqlite_insert(UserContext).values(
+                user_id=user_id,
+                mode=mode,
+                context_data=context_json,
+                message_count=message_count,
+                created_at=now,
+                updated_at=now,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["user_id", "mode"],
+                set_={
+                    "context_data": stmt.excluded.context_data,
+                    "message_count": stmt.excluded.message_count,
+                    "updated_at": stmt.excluded.updated_at,
+                },
+            )
+            await db.execute(stmt)
             await db.commit()
             return True
     except Exception as e:
@@ -544,8 +559,6 @@ async def load_user_context(user_id: int, mode: str) -> list[dict] | None:
     """
     try:
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
-
             result = await db.execute(
                 select(UserContext).where(
                     UserContext.user_id == user_id,

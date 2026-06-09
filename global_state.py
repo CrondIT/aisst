@@ -39,6 +39,7 @@ else:
 
 MAX_CONTEXT_MESSAGES = 5
 MAX_REF_IMAGES = 6  # Максимальное количество изображений для редактирования
+MAX_CONCURRENT_IMAGES = int(os.getenv("MAX_CONCURRENT_IMAGES", "3"))  # Параллельных задач генерации
 
 # разрешенные расширения для разных режимов
 # ext in ALLOWED_EXTENSIONS.get("guestrag") -> True или False
@@ -736,6 +737,16 @@ def get_queue_stats() -> dict:
         if q:
             return q.get_stats()
     return {"error": "Redis not enabled"}
+
+
+def get_queue_size(queue_type: str) -> int:
+    """Возвращает размер указанной очереди Redis."""
+    if not _use_redis:
+        return 0
+    q = _get_queue()
+    if not q:
+        return 0
+    return q.get_queue_size(queue_type)
 
 
 # Хранилище обработанных message ID (для дедупликации)

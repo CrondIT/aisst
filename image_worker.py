@@ -30,6 +30,7 @@ import max_api
 import db as db_module
 from global_state import (
     OPENAI_API_KEY_IMAGE,
+    MAX_CONCURRENT_IMAGES,
     TEMP_DIR,
     get_user_edit_data,
     set_user_edit_data,
@@ -211,58 +212,106 @@ def _cleanup_old_files(image_paths: list[str]) -> None:
                 logger.warning(f"Не удалось удалить файл {path}: {e}")
 
 
+async def _handle_task(
+    task: dict,
+    semaphore: asyncio.Semaphore,
+    queue: RedisQueue,
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """
+    Обрабатывает одну задачу с ограничением параллелизма (Semaphore).
+    
+    Запускается как asyncio.Task — не блокирует основной цикл,
+    позволяя принимать новые задачи из очереди параллельно.
+    """
+    task_id = task.get("id", "unknown")
+    task_type = task.get("type", "image_gen")
+
+    async with semaphore:
+        try:
+            result = await process_image_task(task.get("data", {}))
+
+            # publish_result синхронный (Redis) — не должен блокировать event loop
+            await loop.run_in_executor(
+                None,
+                lambda: queue.publish_result(task_id, result, task_type="image"),
+            )
+
+            if result.get("status") == "completed":
+                logger.info(
+                    f"✅ Задача {task_id[:8]}... выполнена "
+                    f"для user_id={result.get('user_id')}"
+                )
+            else:
+                logger.error(
+                    f"❌ Задача {task_id[:8]}... провалена: "
+                    f"{result.get('error')}"
+                )
+
+        except Exception as e:
+            logger.exception(
+                f"Ошибка обработки задачи {task_id[:8]}...: {e}"
+            )
+            await loop.run_in_executor(
+                None,
+                lambda: queue.publish_result(
+                    task_id,
+                    {
+                        "status": "failed",
+                        "error": str(e),
+                        "user_id": task.get("data", {}).get("user_id"),
+                    },
+                    task_type="image",
+                ),
+            )
+
+
 async def run_worker():
     """Основной цикл воркера."""
     try:
         # Инициализация
         init_openai_client()
         queue = RedisQueue()
-        logger.info("Image Worker запущен, слушаю очереди image_gen и image_edit...")
+        logger.info(
+            f"Image Worker запущен, слушаю очереди image_gen и image_edit... "
+            f"Параллельных задач: {MAX_CONCURRENT_IMAGES}"
+        )
 
         # Инициализируем БД для биллинга
         await db_module.create_database()
 
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_IMAGES)
+        active_tasks: set[asyncio.Task] = set()
+        loop = asyncio.get_running_loop()
+
         while True:
             try:
-                # Получаем задачу из очередей (блокирующий вызов с таймаутом 5 сек)
-                task = queue.dequeue(
-                    queue_types=["image_gen", "image_edit"],
-                    timeout=5,
-                    priority_aware=True
+                # dequeue() синхронный (Redis BLPOP) — выносим в thread pool,
+                # чтобы не блокировать event loop во время ожидания.
+                task = await loop.run_in_executor(
+                    None,
+                    lambda: queue.dequeue(
+                        queue_types=["image_gen", "image_edit"],
+                        timeout=5,
+                        priority_aware=True,
+                    ),
                 )
 
                 if task:
-                    task_id = task.get("id", "unknown")
                     task_type = task.get("type", "image_gen")
-                    logger.info(f"📥 Получена задача {task_id[:8]}... (тип: {task_type})")
+                    logger.info(
+                        f"📥 Получена задача {task.get('id', 'unknown')[:8]}... "
+                        f"(тип: {task_type})"
+                    )
 
-                    try:
-                        # Обрабатываем задачу
-                        result = await process_image_task(task.get("data", {}))
-                        
-                        # Публикуем результат (для redis_listener)
-                        queue.publish_result(task_id, result, task_type="image")
-
-                        if result.get("status") == "completed":
-                            logger.info(
-                                f"✅ Задача {task_id[:8]}... выполнена "
-                                f"для user_id={result.get('user_id')}"
-                            )
-                        else:
-                            logger.error(
-                                f"❌ Задача {task_id[:8]}... провалена: "
-                                f"{result.get('error')}"
-                            )
-
-                    except Exception as e:
-                        logger.exception(
-                            f"Ошибка обработки задачи {task_id[:8]}...: {e}"
-                        )
-                        queue.publish_result(task_id, {
-                            "status": "failed",
-                            "error": str(e),
-                            "user_id": task.get("data", {}).get("user_id"),
-                        }, task_type="image")
+                    # Запускаем обработку параллельно — не ждём завершения,
+                    # сразу идём за следующей задачей.
+                    # Semaphore ограничивает количество одновременных вызовов.
+                    t = asyncio.create_task(
+                        _handle_task(task, semaphore, queue, loop)
+                    )
+                    active_tasks.add(t)
+                    t.add_done_callback(active_tasks.discard)
 
             except RedisQueueError as e:
                 logger.error(f"Ошибка Redis: {e}")
@@ -273,7 +322,13 @@ async def run_worker():
                 await asyncio.sleep(1)
 
     except KeyboardInterrupt:
-        logger.info("Получен сигнал завершения, останавливаюсь...")
+        if active_tasks:
+            logger.info(
+                f"Получен сигнал завершения, "
+                f"ожидаю {len(active_tasks)} активных задач..."
+            )
+            await asyncio.gather(*active_tasks, return_exceptions=True)
+        logger.info("Завершение Image Worker...")
     except Exception as e:
         logger.exception(f"Критическая ошибка воркера: {e}")
         raise
