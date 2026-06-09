@@ -3,6 +3,7 @@ from gigachat.models import Chat, Messages, MessagesRole
 from typing import Optional, List
 from utils import logger
 from gigachat import GigaChat
+from global_state import get_token_limit
 from gigachat.exceptions import (
     GigaChatException,
     AuthenticationError,
@@ -551,11 +552,14 @@ class GigaChatClient:
         self,
         prompt: str,
         temperature: float = 0.7,
-        max_tokens: int = 512,
+        max_tokens: Optional[int] = None,
         model: Optional[str] = None,
         async_mode: bool = True,
     ) -> str:
         model_name = model or self.model
+        # Если max_tokens не задан явно — берём лимит из реестра моделей
+        if max_tokens is None:
+            max_tokens = get_token_limit(model_name)
         logger.info(
             f"GigaChat: запрос к модели {model_name},"
             f" temperature={temperature}, max_tokens={max_tokens}"
@@ -622,7 +626,7 @@ class GigaChatClient:
         self,
         messages: List[dict],
         temperature: float = 0.7,
-        max_tokens: int = 4096,
+        max_tokens: Optional[int] = None,
         model: Optional[str] = None,
     ) -> str:
         """
@@ -634,13 +638,17 @@ class GigaChatClient:
                  {"role": "user", "content": "..."},
                  {"role": "assistant", "content": "..."}]
             temperature: Температура генерации
-            max_tokens: Максимальное количество токенов в ответе
+            max_tokens: Максимальное количество токенов в ответе.
+                        Если не задан — берётся полный лимит модели из get_token_limit()
             model: Название модели (по умолчанию используется self.model)
         
         Returns:
             Текст ответа модели
         """
         model_name = model or self.model
+        # Если max_tokens не задан явно — берём лимит из реестра моделей
+        if max_tokens is None:
+            max_tokens = get_token_limit(model_name)
         logger.info(
             f"GigaChat.chat: модель={model_name}, "
             f"сообщений={len(messages)}, "

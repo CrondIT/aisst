@@ -10,6 +10,7 @@ from global_state import (
     ADMIN_API_TOKEN,
     OPENAI_API_KEY_CHAT,
     GEMINI_API_KEY,
+    get_token_limit,
 )
 from gigachat.client import GigaChat
 from ai_models import GigaChatClient, OpenAIClient, GeminiClient
@@ -73,11 +74,14 @@ async def lifespan(app: FastAPI):
         app.state.giga_client = GigaChatClient(giga_client)
 
         # ─── LangChain-клиент ───  для RAG-цепочки (ask_rag)
+        # max_tokens берётся из реестра моделей, чтобы не хардкодить лимиты
+        _rag_model = MODELS["rag_llm"]
         app.state.giga_lc_client = LangChainGigaChat(
             credentials=GIGACHAT_CONFIG.credentials,
             scope=GIGACHAT_CONFIG.scope,
-            model=MODELS["rag_llm"],
+            model=_rag_model,
             ca_bundle_file=GIGACHAT_CONFIG.ca_bundle_file,
+            max_tokens=get_token_limit(_rag_model),
         )
 
         logger.info("GigaChat клиенты инициализированы (native + langchain)")

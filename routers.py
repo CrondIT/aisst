@@ -32,7 +32,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=8000)
     conversation_id: str | None = None
     temperature: float = Field(default=0.7, ge=0.0, le=1.5)
-    max_tokens: int = Field(default=1500, ge=1, le=4096)
+    max_tokens: int = Field(default=1500, ge=1)
 
 
 def _verify_admin(
