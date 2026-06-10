@@ -23,6 +23,11 @@ if pgrep -f "rag_worker" > /dev/null 2>&1; then
     pkill -f "rag_worker" || true
     sleep 1
 fi
+if pgrep -f "llm_worker" > /dev/null 2>&1; then
+    echo "⚠️  Остановка старых LLM Worker..."
+    pkill -f "llm_worker" || true
+    sleep 1
+fi
 if pgrep -f "image_worker" > /dev/null 2>&1; then
     echo "⚠️  Остановка старых Image Worker..."
     pkill -f "image_worker" || true
@@ -50,6 +55,10 @@ fi
 echo "Создание tmux-сессии '$SESSION_NAME'..."
 tmux new-session -d -s "$SESSION_NAME" -n "rag_worker" \
     "$PYTHON -m rag_chain.rag_worker"
+
+# Добавляем окно для llm_worker
+tmux new-window -t "$SESSION_NAME" -n "llm_worker" \
+    "$PYTHON llm_worker.py"
 
 # Добавляем окно для image_worker
 tmux new-window -t "$SESSION_NAME" -n "image_worker" \
@@ -81,9 +90,10 @@ echo "=========================================="
 echo ""
 echo "Окна:"
 echo "  1. rag_worker      — обработка RAG задач"
-echo "  2. image_worker    — генерация изображений"
-echo "  3. redis_listener  — слушатель результатов"
-echo "  4. gunicorn        — веб-сервер"
+echo "  2. llm_worker      — LLM запросы (chat, gigachat, gemini)"
+echo "  3. image_worker    — генерация изображений"
+echo "  4. redis_listener  — слушатель результатов"
+echo "  5. gunicorn        — веб-сервер"
 echo ""
 echo "Управление:"
 echo "  tmux attach -t $SESSION_NAME     — подключиться"

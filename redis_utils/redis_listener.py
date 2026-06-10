@@ -11,7 +11,7 @@ import sys
 from typing import Optional, Dict, Any
 
 from .redis_queue import RedisQueue, RedisQueueError
-from .redis_config import REDIS_PREFIX
+from .redis_config import REDIS_PREFIX, LLM_TASK_TIMEOUT
 
 
 # Настройка логирования
@@ -151,6 +151,8 @@ class RedisListener:
             await self._process_rag_result(task_id, user_id, data)
         elif task_type == "image":
             await self._process_image_result(task_id, user_id, data)
+        elif task_type == "llm":
+            await self._process_llm_result(task_id, user_id, data)
         else:
             # Для остальных задач используем старый метод
             await self._process_task_result(task_id, user_id)
@@ -185,6 +187,45 @@ class RedisListener:
         else:
             logger.warning(
                 f"⚠️ Неизвестный статус RAG задачи: {status}"
+            )
+
+    async def _process_llm_result(
+        self, task_id: str, user_id: int, data: dict
+    ):
+        """
+        Обрабатывает результат LLM задачи (chat, gigachatpro, gemini).
+
+        Args:
+            task_id: Идентификатор задачи
+            user_id: ID пользователя
+            data: Данные уведомления с результатом
+        """
+        status = data.get("status")
+        result = data.get("result")
+        error = data.get("error")
+
+        if status == "completed":
+            logger.info(
+                f"✅ LLM задача {task_id[:8]}... выполнена для user_id={user_id}"
+            )
+            await self._send_max_message(user_id, result)
+            self.tasks_processed += 1
+        elif status == "failed":
+            logger.error(
+                f"❌ LLM задача {task_id[:8]}... провалена: {error}"
+            )
+            message = f"❌ Ошибка обработки запроса:\n{error[:500]}"
+            await self._send_max_message(user_id, message)
+            self.tasks_failed += 1
+        elif status == "timeout":
+            await self._send_max_message(
+                user_id,
+                "⏱️ Превышено время ожидания ответа. Попробуйте ещё раз."
+            )
+            self.tasks_failed += 1
+        else:
+            logger.warning(
+                f"⚠️ Неизвестный статус LLM задачи: {status}"
             )
 
     async def _process_image_result(

@@ -6,6 +6,8 @@ from global_state import (
     RATE_LIMIT_PER_MINUTE,
     ALLOWED_EXTENSIONS,
     check_rate_limit,
+    _use_redis,
+    get_user_mode,
 )
 import bot_logic
 import db
@@ -321,6 +323,15 @@ async def process_update(
                     user_id, result.text, format=result.format
                 )
             return
+
+    # 10. LLM-режимы → очередь (если USE_REDIS=True)
+    user_mode = get_user_mode(user_id)
+    if _use_redis and user_mode in bot_logic.LLM_QUEUE_MODES:
+        await bot_logic.enqueue_llm_request(user_text, sender, user_mode)
+        await max_api.send_message(
+            user_id, "⏳ Запрос обрабатывается..."
+        )
+        return
 
     try:
         reply_text = await bot_logic.handle_message(

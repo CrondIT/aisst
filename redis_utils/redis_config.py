@@ -41,6 +41,7 @@ REDIS_TTL = {
     "user_edit": int(os.getenv("REDIS_TTL_USER_EDIT", 1800)),  # 30 минут
     "task_result": int(os.getenv("REDIS_TTL_TASK_RESULT", 1800)),  # 30 мин для RAG
     "image_result": int(os.getenv("REDIS_TTL_IMAGE_RESULT", 600)),  # 10 мин для изображений
+    "llm_result": int(os.getenv("REDIS_TTL_LLM_RESULT", 600)),  # 10 мин для LLM
     "rate_limit": int(os.getenv("REDIS_TTL_RATE_LIMIT", 60)),  # 1 минута
 }
 
@@ -51,6 +52,7 @@ QUEUE_CONFIG = {
     "file_process": os.getenv("QUEUE_FILE_PROCESS", "file_process"),  # Обработка файлов
     "image_gen": os.getenv("QUEUE_IMAGE_GEN", "image_gen"),  # Генерация изображений
     "image_edit": os.getenv("QUEUE_IMAGE_EDIT", "image_edit"),  # Редактирование изображений
+    "llm": os.getenv("QUEUE_LLM", "llm"),  # LLM-запросы (chat, gigachat, gemini)
     "high_priority": os.getenv("QUEUE_HIGH_PRIORITY", "high"),  # Высокий приоритет
     "low_priority": os.getenv("QUEUE_LOW_PRIORITY", "low"),  # Низкий приоритет
 }
@@ -60,3 +62,4 @@ REDIS_NOTIFICATION_CHANNEL = os.getenv("REDIS_NOTIFICATION_CHANNEL", "notificati
 
 # TTL для результатов задач по типу (в секундах)
 RAG_TASK_TIMEOUT = int(os.getenv("RAG_TASK_TIMEOUT", 3600))  # 1 час для RAG задач
+LLM_TASK_TIMEOUT = int(os.getenv("LLM_TASK_TIMEOUT", 120))  # 2 минуты для LLM задач

@@ -10,10 +10,11 @@ Environment=PATH="/root/aisst/.venv/bin"
 ExecStart=/root/aisst/.venv/bin/gunicorn main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind unix:/tmp/fastapi.sock --umask 000 --timeout 300 --keep-alive 60
 ExecStartPre=/root/aisst/.venv/bin/python -m redis_utils.redis_listener &
 ExecStartPre=/root/aisst/.venv/bin/python -m rag_chain.rag_worker &
+ExecStartPre=/root/aisst/.venv/bin/python llm_worker.py &
 ExecStartPre=/root/aisst/.venv/bin/python image_worker.py &
 # Убиваем ВСЕ процессы с этими именами при остановке/перезапуске
-ExecStop=/bin/bash -c "pkill -f rag_worker; pkill -f image_worker; pkill -f redis_listener; pkill -f 'gunicorn main:app'"
-ExecStopPost=/bin/bash -c "sleep 1; pkill -9 -f rag_worker; pkill -9 -f image_worker; pkill -9 -f redis_listener; pkill -9 -f 'gunicorn main:app'"
+ExecStop=/bin/bash -c "pkill -f rag_worker; pkill -f llm_worker; pkill -f image_worker; pkill -f redis_listener; pkill -f 'gunicorn main:app'"
+ExecStopPost=/bin/bash -c "sleep 1; pkill -9 -f rag_worker; pkill -9 -f llm_worker; pkill -9 -f image_worker; pkill -9 -f redis_listener; pkill -9 -f 'gunicorn main:app'"
 Restart=always
 RestartSec=5
 

@@ -18,9 +18,12 @@ from global_state import (
     get_user_edit_data,
     set_user_edit_data,
     clear_user_context_async,
+    get_user_context_async,
+    set_user_context_async,
 )
 from utils import logger
 from keyboards import COLLEGE_BUTTONS, START_BUTTONS
+from shared.message_utils import get_file_extracted_text
 from rag_chain import save_to_vector_db
 from mentor.mentor_logic import handle_mentor_mode
 from handlers.base import ModeHandler
@@ -101,6 +104,57 @@ mode_map = {
         "Очистить историю диалога в текущем режиме"
     ),
 }
+
+
+# Режимы, которые обрабатываются через LLM Worker (Redis очередь)
+LLM_QUEUE_MODES = {"gigachatpro", "chat", "gemini"}
+
+
+# Маппинг режимов → модель для LLM Worker
+_LLM_MODELS = {
+    "gigachatpro": "GigaChat",
+    "chat": "gpt-5.2-chat-latest",
+    "gemini": "gemini-2.5-pro",
+}
+
+
+async def enqueue_llm_request(
+    user_text: str,
+    sender: dict,
+    mode: str,
+) -> None:
+    """
+    Сохраняет сообщение пользователя в контекст и ставит задачу в очередь LLM.
+
+    Вызывается из max_update_handler вместо прямого вызова handle_message
+    для LLM-режимов, когда USE_REDIS=True.
+    """
+    user_id = int(sender.get("user_id"))
+
+    # 1. Загружаем контекст и добавляем сообщение пользователя
+    context = await get_user_context_async(user_id, mode)
+    context.append({"role": "user", "content": user_text})
+    await set_user_context_async(user_id, mode, context)
+
+    # 2. Проверяем, есть ли файл
+    extracted_text = get_file_extracted_text(user_id)
+
+    # 3. Ставим задачу в очередь
+    model = _LLM_MODELS.get(mode, "GigaChat")
+    task_data = {
+        "mode": mode,
+        "model": model,
+        "user_id": user_id,
+        "user_text": user_text,
+        "sender": sender,
+        "extracted_text": extracted_text,
+        "temperature": 0.7,
+    }
+
+    if not _use_redis:
+        raise RuntimeError("USE_REDIS=false — LLM очередь не доступна")
+
+    enqueue_task("llm", task_data, priority="normal")
 
 
 class _MentorHandlerWrapper:
