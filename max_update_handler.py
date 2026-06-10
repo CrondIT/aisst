@@ -69,7 +69,9 @@ async def _process_audio_and_respond(
     finally:
         if os.path.exists(file_path):
             os.remove(file_path)
-            logger.info("Временный файл голосового сообщения удалён: %s", file_path)
+            logger.info(
+                "Временный файл голосового сообщения удалён: %s", file_path
+            )
 
 
 def _check_rate_limit(user_id: int) -> bool:
@@ -122,11 +124,18 @@ async def process_update(
         callback_data = callback_obj.get("payload", "")
         logger.info(f"Callback от {sender.get('name')}: {callback_data}")
         if callback_data and user_id:
-            command_response = await bot_logic.handle_command(
+            result = await bot_logic.handle_command(
                 callback_data, sender, request.app.state
             )
-            if command_response is not None:
-                await max_api.send_message(user_id, command_response, format="markdown")
+            if result is not None:
+                if result.buttons:
+                    await max_api.send_inline_message(
+                        user_id, result.text, result.buttons, format=result.format
+                    )
+                else:
+                    await max_api.send_message(
+                        user_id, result.text, format=result.format
+                    )
         return
 
     # 3. Фильтрация по типу
@@ -134,7 +143,8 @@ async def process_update(
         return
 
     message = update.get("message", {})
-    # Timestamp может быть в message.timestamp (миллисекунды) или message.created_at (ISO)
+    # Timestamp может быть в message.timestamp (миллисекунды) 
+    # или message.created_at (ISO)
     message_timestamp_ms = message.get("timestamp")
     message_created_at = message.get("created_at")
     
@@ -252,7 +262,9 @@ async def process_update(
                 request, file_path, sender
             )
             if reply_text:
-                await max_api.send_message(user_id, reply_text, format="markdown")
+                await max_api.send_message(
+                    user_id, reply_text, format="markdown"
+                )
             return
 
         # 8.3 Файлы
@@ -296,22 +308,24 @@ async def process_update(
 
     # 9. Обработка команд
     if user_text.startswith("/"):
-        command_parts = user_text.split(maxsplit=1)
-        command = command_parts[0].lower()
-        if command == "/college" and permission != 1:
-            text = "Я Ваш персональный ИИ помощник!"
-            await max_api.send_inline_message(user_id, text)
-            return
-        else:
-            command_response = await bot_logic.handle_command(
-                user_text, sender, request.app.state
-            )
-        if command_response is not None:
-            await max_api.send_message(user_id, command_response, format="markdown")
+        result = await bot_logic.handle_command(
+            user_text, sender, request.app.state
+        )
+        if result is not None:
+            if result.buttons:
+                await max_api.send_inline_message(
+                    user_id, result.text, result.buttons, format=result.format
+                )
+            else:
+                await max_api.send_message(
+                    user_id, result.text, format=result.format
+                )
             return
 
     try:
-        reply_text = await bot_logic.handle_message(request, user_text, sender)
+        reply_text = await bot_logic.handle_message(
+            request, user_text, sender
+        )
 
         # None означает ошибку, пустая строка "" означает успех без ответа
         if reply_text is None:

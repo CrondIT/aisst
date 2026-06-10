@@ -116,18 +116,8 @@ async def send_image(
             return None
 
 
-BUTTONS = [
-    {"text": "Чат с агентом", "command": "/gigachat"},
-    {"text": "Чат с ИИ", "command": "/gigachatpro"},
-    {"text": "Настройки агента", "command": "/rag"},
-    {"text": "Оплата", "command": "/billing"},
-    {"text": "Промпты", "command": "/edit"},
-    {"text": "Тесты", "command": "/mentor"},
-]
-
-
 async def send_inline_message(
-        user_id: int, text: str, buttons: list[dict] = None,
+        user_id: int, text: str, buttons: list[dict],
         format: str = None
 ) -> int | None:
     """Отправка сообщения с инлайн кнопками через API MAX.
@@ -135,11 +125,9 @@ async def send_inline_message(
     Args:
         user_id: ID пользователя
         text: Текст сообщения
-        buttons: Список кнопок
+        buttons: Список кнопок (обязателен, импортируйте из keyboards.py)
         format: Формат текста ("markdown", "html" или None для plain text)
     """
-    if buttons is None:
-        buttons = BUTTONS
     url = f"{MAX_BASE_URL}/messages"
     headers = {
         "Authorization": MAX_API_TOKEN,

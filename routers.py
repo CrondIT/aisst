@@ -203,11 +203,12 @@ async def send_command(request: Request):
     sender = {"user_id": user_id, "name": "mini_app_user"}
 
     result = await bot_logic.handle_command(command, sender, request.app.state)
+    response_text = result.text if result else None
     if result:
-        await max_api.send_message(user_id, result)
+        await max_api.send_message(user_id, result.text, format=result.format)
 
     return JSONResponse(
-        content={"success": True, "command": command, "response": result}
+        content={"success": True, "command": command, "response": response_text}
     )
 
 

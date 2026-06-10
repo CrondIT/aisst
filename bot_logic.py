@@ -1,5 +1,6 @@
 """Модуль бизнес-логики бота: обработка команд и сообщений."""
 import os
+from dataclasses import dataclass
 from fastapi import Request
 
 import db
@@ -19,6 +20,7 @@ from global_state import (
     clear_user_context_async,
 )
 from utils import logger
+from keyboards import COLLEGE_BUTTONS, START_BUTTONS
 from rag_chain import save_to_vector_db
 from mentor.mentor_logic import handle_mentor_mode
 from handlers.base import ModeHandler
@@ -28,6 +30,14 @@ from handlers.rag_handler import RagHandler
 from handlers.edit_handler import EditHandler
 from handlers.image_handler import ImageHandler
 import extract_text_from_file_utils
+
+
+@dataclass
+class CommandResult:
+    """Результат обработки команды: текст ответа и опциональные кнопки."""
+    text: str
+    buttons: list[dict] | None = None
+    format: str | None = "markdown"
 
 mode_map = {
     "/aiagent": (
@@ -144,10 +154,10 @@ async def _handle_models_command(app_state: object) -> str:
 
 async def handle_command(
     user_text: str, sender: dict, app_state: object = None
-) -> str | None:
+) -> CommandResult | None:
     """
     Обработка команд бота - устанавливает режим пользователя
-    и возвращает текст ответа для информирования пользователя 
+    и возвращает CommandResult (текст ответа + опциональные кнопки)
     или None, если команда не распознана.
     """
     if not user_text.startswith("/"):
@@ -158,27 +168,47 @@ async def handle_command(
     user_name = sender.get("name", "Неизвестный пользователь")
     user_id = int(sender.get("user_id"))
     user_data = await db.get_user(user_id)
+    if user_data is None:
+        await db.create_user(user_id, user_name)
+        user_data = await db.get_user(user_id)
+        if user_data is None:
+            return CommandResult(text="Ошибка регистрации. Попробуйте позже.")
     # если пользователь гость то разрещен только один режим (для бота ССТ)
     if user_data["permission"] == 1:
         command = "/aiagent"  
 
+    if command == "/college":
+        return CommandResult(
+            text="Я Ваш персональный ИИ помощник!",
+            buttons=COLLEGE_BUTTONS,
+            format=None,
+        )
+
+    if command == "/start":
+        return CommandResult(
+            text="Добро пожаловать!",
+            buttons=START_BUTTONS,
+            format=None,
+        )
+
     if command == "/billing":
         if user_data:
             balance = user_data["coins"] + user_data["giftcoins"]
-            return f"Уважаемый: {user_name}!\n" f"Ваш баланс: {balance} ₽"
-        return f"Пользователь: {user_name} в списках не значится)"
+            return CommandResult(text=f"Уважаемый: {user_name}!\nВаш баланс: {balance} ₽")
+        return CommandResult(text=f"Пользователь: {user_name} в списках не значится)")
     
     if command == "/models":
-        return await _handle_models_command(app_state)
+        text = await _handle_models_command(app_state)
+        return CommandResult(text=text)
     
     if command == "/mode":
-        return get_user_mode(user_id)
+        return CommandResult(text=get_user_mode(user_id))
     
     if command in ("/clear", "/reset"):
         user_mode = get_user_mode(user_id)
         # Очищаем контекст текущего режима (из кэша И из БД)
         await clear_user_context_async(user_id, user_mode)
-        return f"История диалога в режиме '{user_mode}' очищена."
+        return CommandResult(text=f"История диалога в режиме '{user_mode}' очищена.")
     
     if command in mode_map:
         mode, reply = mode_map[command]
@@ -213,9 +243,9 @@ async def handle_command(
                 # Текст после /mentor — пусть handle_message его обработает
                 return None
         
-        return reply
+        return CommandResult(text=reply)
     
-    return "Вы ввели неправильную команду"
+    return CommandResult(text="Вы ввели неправильную команду")
 
 
 async def handle_message(
