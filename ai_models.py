@@ -283,6 +283,7 @@ class GeminiClient:
         temperature: float = 0.7,
         max_tokens: int = 4096,
         model: str = "gemini-2.5-pro",
+        image_paths: list[str] | None = None,
     ) -> str:
         model_name = model
         logger.info(
@@ -291,6 +292,10 @@ class GeminiClient:
             f"temperature={temperature}, max_tokens={max_tokens}"
         )
         try:
+            import io
+            from PIL import Image
+            from google.genai import types
+
             system_instruction = None
             contents = []
             for msg in messages:
@@ -308,6 +313,31 @@ class GeminiClient:
                         "role": "user",
                         "parts": [{"text": content_text}],
                     })
+
+            # Добавляем изображения в последнее user-сообщение
+            if image_paths:
+                for i in range(len(contents) - 1, -1, -1):
+                    if contents[i]["role"] == "user":
+                        parts = list(contents[i]["parts"])
+                        text = next(
+                            (p["text"] for p in parts if "text" in p), ""
+                        )
+                        new_parts = []
+                        for path in image_paths:
+                            if path and os.path.exists(path):
+                                img = Image.open(path)
+                                buffer = io.BytesIO()
+                                img.save(buffer, format="PNG")
+                                buffer.seek(0)
+                                new_parts.append(
+                                    types.Part.from_bytes(
+                                        data=buffer.read(),
+                                        mime_type="image/png",
+                                    )
+                                )
+                        new_parts.append(types.Part.from_text(text))
+                        contents[i]["parts"] = new_parts
+                        break
 
             config = {
                 "temperature": temperature,

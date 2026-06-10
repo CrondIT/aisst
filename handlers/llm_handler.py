@@ -14,6 +14,9 @@ from global_state import (
     set_user_context_async,
     MAX_CONTEXT_MESSAGES,
     MODELS,
+    get_user_gemini_image_queue,
+    clear_user_gemini_image_queue,
+    get_user_gemini_files,
 )
 from utils import logger
 
@@ -60,6 +63,22 @@ class LlmDirectHandler(ModeHandler):
         # 3. Проверяем, есть ли файл
         extracted_text = get_file_extracted_text(user_id)
 
+        # Для gemini — собираем очередь изображений и накопленные файлы
+        gemini_image_paths = None
+        if self.mode_name == "gemini":
+            gemini_image_paths = get_user_gemini_image_queue(user_id)
+            clear_user_gemini_image_queue(user_id)
+            gemini_files = get_user_gemini_files(user_id)
+            if gemini_files:
+                parts = []
+                for f in gemini_files:
+                    parts.append(f"[{f['name']}]:\n{f['text']}")
+                file_text = "\n\n---\n\n".join(parts)
+                extracted_text = (
+                    f"{file_text}\n\n{extracted_text}"
+                    if extracted_text else file_text
+                )
+
         # full_prompt сам обработает запрос формата (JSON-схему) и контекст
         user_prompt = await full_prompt(
             user_id, user_text, extracted_text, context=context
@@ -84,10 +103,10 @@ class LlmDirectHandler(ModeHandler):
         )
 
         # 5. Отправляем в LLM
-        answer = await client.chat(
-            messages=user_prompt,
-            model=self.model_name,
-        )
+        chat_kwargs = {"messages": user_prompt, "model": self.model_name}
+        if gemini_image_paths:
+            chat_kwargs["image_paths"] = gemini_image_paths
+        answer = await client.chat(**chat_kwargs)
 
         # 6. Добавляем ответ модели в контекст
         context.append({"role": "assistant", "content": answer})

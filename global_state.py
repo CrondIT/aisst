@@ -30,11 +30,16 @@ if os.getenv("USE_REDIS", "false").lower() != "true":
     user_last_edited_images = {}
     # Хранит очередь изображений для редактирования для каждого пользователя
     user_edit_images_queue = {}
+    # Хранит очередь изображений для режима gemini
+    user_gemini_image_queue = {}
+    # Хранит список файлов (с извлечённым текстом) для режима gemini
+    user_gemini_files = {}
 else:
     # Заглушки, чтобы код не падал при импорте
     user_contexts = user_modes = user_edit_data = user_file_data = {}
     user_edit_pending = user_pending_delete = user_previous_modes = {}
     edited_photo_id = user_last_edited_images = user_edit_images_queue = {}
+    user_gemini_image_queue = user_gemini_files = {}
     user_mentor_state = {}  # Состояние ментора для каждого пользователя
 
 MAX_CONTEXT_MESSAGES = 5
@@ -637,6 +642,82 @@ def set_user_edit_queue(user_id: int, queue: list):
         user_edit_images_queue[user_id] = queue
 
 
+# ==================== Gemini Image Queue ====================
+
+def get_user_gemini_image_queue(user_id: int) -> list:
+    """Получает очередь изображений для gemini-режима"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            queue = q.get_user_state(user_id, "gemini_image_queue")
+            if queue:
+                return queue
+    else:
+        return user_gemini_image_queue.get(user_id, [])
+    return []
+
+
+def set_user_gemini_image_queue(user_id: int, queue: list):
+    """Сохраняет очередь изображений для gemini-режима"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.set_user_state(user_id, "gemini_image_queue", queue)
+    else:
+        user_gemini_image_queue[user_id] = queue
+
+
+def clear_user_gemini_image_queue(user_id: int):
+    """Очищает очередь изображений gemini-режима"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.delete_user_state(user_id, "gemini_image_queue")
+    else:
+        user_gemini_image_queue.pop(user_id, None)
+
+
+# ==================== Gemini Files ====================
+
+def get_user_gemini_files(user_id: int) -> list[dict]:
+    """Получает список файлов gemini-режима [{name, text}, ...]"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            data = q.get_user_state(user_id, "gemini_files")
+            if data:
+                return data
+    else:
+        return user_gemini_files.get(user_id, [])
+    return []
+
+
+def add_user_gemini_file(user_id: int, file_entry: dict):
+    """Добавляет файл в список gemini-режима.
+    file_entry = {"name": "filename.pdf", "text": "extracted text"}
+    """
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            existing = get_user_gemini_files(user_id)
+            existing.append(file_entry)
+            q.set_user_state(user_id, "gemini_files", existing)
+    else:
+        existing = user_gemini_files.get(user_id, [])
+        existing.append(file_entry)
+        user_gemini_files[user_id] = existing
+
+
+def clear_user_gemini_files(user_id: int):
+    """Очищает список файлов gemini-режима"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.delete_user_state(user_id, "gemini_files")
+    else:
+        user_gemini_files.pop(user_id, None)
+
+
 def clear_user_data(user_id: int):
     """Очищает все данные пользователя"""
     if _use_redis:
@@ -650,6 +731,8 @@ def clear_user_data(user_id: int):
             user_file_data,
             user_edit_data,
             user_edit_images_queue,
+            user_gemini_image_queue,
+            user_gemini_files,
             user_edit_pending,
             edited_photo_id,
             user_last_edited_images,

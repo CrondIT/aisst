@@ -20,6 +20,12 @@ from global_state import (
     clear_user_context_async,
     get_user_context_async,
     set_user_context_async,
+    get_user_gemini_image_queue,
+    set_user_gemini_image_queue,
+    clear_user_gemini_image_queue,
+    clear_user_gemini_files,
+    get_user_gemini_files,
+    add_user_gemini_file,
 )
 from utils import logger
 from keyboards import COLLEGE_BUTTONS, START_BUTTONS
@@ -139,7 +145,20 @@ async def enqueue_llm_request(
     # 2. Проверяем, есть ли файл
     extracted_text = get_file_extracted_text(user_id)
 
-    # 3. Ставим задачу в очередь
+    # 3. Для gemini — собираем очереди изображений и файлов
+    gemini_image_queue = None
+    gemini_extracted_text = None
+    if mode == "gemini":
+        gemini_image_queue = get_user_gemini_image_queue(user_id)
+        clear_user_gemini_image_queue(user_id)
+        gemini_files = get_user_gemini_files(user_id)
+        if gemini_files:
+            parts = []
+            for f in gemini_files:
+                parts.append(f"[{f['name']}]:\n{f['text']}")
+            gemini_extracted_text = "\n\n---\n\n".join(parts)
+
+    # 4. Ставим задачу в очередь
     model = _LLM_MODELS.get(mode, "GigaChat")
     task_data = {
         "mode": mode,
@@ -147,9 +166,11 @@ async def enqueue_llm_request(
         "user_id": user_id,
         "user_text": user_text,
         "sender": sender,
-        "extracted_text": extracted_text,
+        "extracted_text": gemini_extracted_text or extracted_text,
         "temperature": 0.7,
     }
+    if gemini_image_queue:
+        task_data["gemini_image_queue"] = gemini_image_queue
 
     if not _use_redis:
         raise RuntimeError("USE_REDIS=false — LLM очередь не доступна")
@@ -262,6 +283,9 @@ async def handle_command(
         user_mode = get_user_mode(user_id)
         # Очищаем контекст текущего режима (из кэша И из БД)
         await clear_user_context_async(user_id, user_mode)
+        if user_mode == "gemini":
+            clear_user_gemini_image_queue(user_id)
+            clear_user_gemini_files(user_id)
         return CommandResult(text=f"История диалога в режиме '{user_mode}' очищена.")
     
     if command in mode_map:
@@ -278,6 +302,10 @@ async def handle_command(
                 except OSError:
                     pass
             set_user_edit_data(user_id, {})
+        # При переключении с gemini — очищаем очереди
+        if current_mode == "gemini" and mode != "gemini":
+            clear_user_gemini_image_queue(user_id)
+            clear_user_gemini_files(user_id)
         
         set_user_mode(user_id, mode)
         # Очищаем состояние подтверждения удаления
@@ -286,6 +314,11 @@ async def handle_command(
         # Для /image — очищаем очередь изображений для новой сессии
         if command == "/image":
             set_user_edit_queue(user_id, [])
+        
+        # Для /gemini — очищаем очереди для новой сессии
+        if command == "/gemini":
+            clear_user_gemini_image_queue(user_id)
+            clear_user_gemini_files(user_id)
         
         # Для /mentor — очищаем состояние ментора и парсим новую команду
         if command == "/mentor":
@@ -340,6 +373,14 @@ async def handle_image(
         return "Изображение получено. Опишите, что нужно изменить."
     if user_mode == "edit":
         return "Режим редактирования ещё не реализован."
+    if user_mode == "gemini":
+        # Добавляем изображение в очередь gemini-режима
+        queue = get_user_gemini_image_queue(user_id)
+        queue.append(image_path)
+        if len(queue) > MAX_REF_IMAGES:
+            queue = queue[-MAX_REF_IMAGES:]
+        set_user_gemini_image_queue(user_id, queue)
+        return f"Изображение получено ({len(queue)} в очереди). Задайте вопрос."
     return "Режим еще не работает"
 
 
@@ -377,6 +418,16 @@ async def handle_file(file_name: str, sender: dict) -> str | None:
     # если любой другой режим то на данном этапе файл уже сохранен 
     # во временной папке, фиксируем путь в 
     # кроме режима редактирования изображений
+    elif user_mode == "gemini":
+        # извлекаем содержимое и добавляем в список gemini-файлов
+        extracted_text = await extract_text_from_file_utils.process_uploaded_file(
+                file_name
+            )
+        name = os.path.basename(file_name)
+        add_user_gemini_file(user_id, {"name": name, "text": extracted_text})
+        count = len(get_user_gemini_files(user_id))
+        return f"Файл получен ({count} в списке). Задайте вопрос."
+
     else:
         # извлекаем содержимое файла
         extracted_text = await extract_text_from_file_utils.process_uploaded_file(

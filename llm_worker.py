@@ -92,7 +92,10 @@ def init_clients():
         logger.info("✅ LangChain GigaChat клиент инициализирован")
 
 
-async def _call_llm(mode: str, messages: list[dict], model: str) -> str:
+async def _call_llm(
+    mode: str, messages: list[dict], model: str,
+    image_paths: list[str] | None = None,
+) -> str:
     """Вызывает соответствующую LLM в зависимости от режима."""
     if mode in ("chat",):
         if not openai_client:
@@ -107,7 +110,9 @@ async def _call_llm(mode: str, messages: list[dict], model: str) -> str:
     if mode == "gemini":
         if not gemini_client:
             raise RuntimeError("Gemini клиент не настроен")
-        return await gemini_client.chat(messages=messages, model=model)
+        return await gemini_client.chat(
+            messages=messages, model=model, image_paths=image_paths,
+        )
 
     raise RuntimeError(f"Неизвестный режим LLM: {mode}")
 
@@ -134,6 +139,7 @@ async def process_llm_task(task_data: dict) -> dict:
     sender = task_data.get("sender", {})
     extracted_text = task_data.get("extracted_text")
     temperature = task_data.get("temperature", 0.7)
+    gemini_image_paths = task_data.get("gemini_image_queue")
 
     if not mode or not user_id:
         logger.error(f"Неполные данные задачи: {task_data}")
@@ -176,7 +182,10 @@ async def process_llm_task(task_data: dict) -> dict:
         for attempt in range(MAX_RETRIES):
             try:
                 async with asyncio.timeout(LLM_TIMEOUT):
-                    answer = await _call_llm(mode, user_prompt, model)
+                    answer = await _call_llm(
+                        mode, user_prompt, model,
+                        image_paths=gemini_image_paths,
+                    )
                 break
             except (asyncio.TimeoutError, RuntimeError) as e:
                 last_error = str(e)
