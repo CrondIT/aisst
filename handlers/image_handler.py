@@ -5,6 +5,7 @@ from fastapi import Request
 
 import db
 import max_api
+from config import MODELS
 from global_state import (
     get_user_edit_data,
     set_user_edit_data,
@@ -31,12 +32,12 @@ class ImageHandler(ModeHandler):
 
     def __init__(
         self,
-        client_attr: str = "gemini_client",
-        model_name: str = "gemini-3.1-flash-image-preview",
+        client_attr: str = "openai_client",
+        model_name: str | None = None,
         error_msg: str = "Клиент изображений не настроен.",
     ):
         self.client_attr = client_attr
-        self.model_name = model_name
+        self.model_name = model_name or MODELS["image"]
         self.error_msg = error_msg
 
     async def handle(

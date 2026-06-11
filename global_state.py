@@ -103,22 +103,12 @@ OPENAI_API_KEY_CHAT = os.getenv("OPENAI_API_KEY")
 OPENAI_API_KEY_IMAGE = os.getenv("OPENAI_API_KEY_IMAGE")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Имена моделей для GigaChat (вынесены в .env для централизованной смены)
-MODEL_RAG_LLM = os.getenv("MODEL_RAG_LLM", "GigaChat")         # LangChain LLM в RAG
-MODEL_EMBEDDINGS = os.getenv("MODEL_EMBEDDINGS", "Embeddings")  # GigaChat Embeddings
+# Имена моделей — централизованы в config.py, реэкспортируются для обратной совместимости
+from config import MODELS, get_token_limit
 
-# Модели для разных режимов
-MODELS = {
-    "chat": "gpt-5.2-chat-latest",
-    "image": "gemini-3.1-flash-image-preview",
-    "ai_file": "gpt-5.2-chat-latest",
-    "aiagent": "GigaChat",
-    "gigachatpro": "GigaChat",
-    "chatgpt": "gpt-5.2-chat-latest",   # режим ChatGPT
-    "gemini": "gemini-2.5-pro",          # режим Gemini
-    "rag_llm": MODEL_RAG_LLM,           # LangChain GigaChat для RAG
-    "embeddings": MODEL_EMBEDDINGS,     # GigaChat Embeddings
-}
+# Для обратной совместимости: старые имена переменных
+MODEL_RAG_LLM = MODELS["rag_llm"]
+MODEL_EMBEDDINGS = MODELS["embeddings"]
 
 # ─── Единый конфиг подключения к GigaChat ───
 @dataclass(frozen=True)
@@ -127,6 +117,7 @@ class GigaChatConfig:
     credentials: str
     scope: str
     ca_bundle_file: str | None
+
 
 GIGACHAT_CONFIG = GigaChatConfig(
     credentials=GIGACHAT_API_KEY,
@@ -170,41 +161,6 @@ PROXY_USER = os.getenv("PROXY_USER", "")
 PROXY_PASSWORD = os.getenv("PROXY_USER_PASSWORD", "")
 
 
-def get_token_limit(model_name: str) -> int:
-    """
-    Get the maximum token limit for a specific model
-    """
-    model_name_lower = model_name.lower()
-    limits = {
-        # OpenAI models
-        "gpt-5.2": 128000,
-        "gpt-5.1": 128000,
-        "gpt-4o-mini": 128000,
-        "gpt-4-turbo": 128000,
-        "gpt-4o": 128000,
-        "gpt-4": 8192,
-        "gpt-5.2-chat-latest": 128000,
-        # DALL-E models
-        "dall-e-3": 4096,  # Prompt length limit
-        # Gemini models
-        "imagen-4.0-generate-001": 8192,
-        "gemini-2.5-pro": 2097152,
-        "gemini-2.5-flash-image": 32768,
-        "gemini-3-pro-image-preview": 32768,
-        "gemini-1.5-pro": 1048576,
-        "gemini-1.0-pro": 32768,
-        # GigaChat models
-        "gigachat-2-max": 128000,
-        "gigachat-2-pro": 32768,
-        "gigachat-2": 8192,
-        "gigachat-4": 128000,
-        "gigachat": 8192,
-        # GigaChat Embeddings (not used for chat, just for similarity)
-        "embeddings": 8192,
-    }
-
-    return limits.get(model_name_lower, 4096)  # Default fallback
-
 
 # Maximum cost per message
 COST_PER_MESSAGE = {
@@ -245,7 +201,7 @@ SYSTEM_PROMPTS = {
         "предыдущие вопросы и ответы."
     ),
     "gigachatpro": (
-        "Ты — продвинутый AI-ассистент на базе GigaChat Pro. "
+        "Ты — продвинутый AI-ассистент на базе GigaChat-2-Pro. "
         "Помогаешь пользователям с любыми вопросами, "
         "предоставляя подробные и точные ответы."
     ),

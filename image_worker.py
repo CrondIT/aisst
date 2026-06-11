@@ -75,7 +75,8 @@ async def process_image_task(task_data: dict) -> dict:
     """
     user_id = task_data.get("user_id")
     prompt = task_data.get("prompt", "")
-    model = task_data.get("model", "gpt-image-2")
+    from config import MODELS
+    model = task_data.get("model") or MODELS["image"]
     size = task_data.get("size", "1024x1024")
     image_paths = task_data.get("image_paths", [])
     operation = task_data.get("operation", "генерация")

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from fastapi import Request
 
 import db
+from config import MODELS
 from global_state import (
     get_user_mode,
     set_user_mode,
@@ -116,14 +117,6 @@ mode_map = {
 LLM_QUEUE_MODES = {"gigachatpro", "chat", "gemini"}
 
 
-# Маппинг режимов → модель для LLM Worker
-_LLM_MODELS = {
-    "gigachatpro": "GigaChat",
-    "chat": "gpt-5.2-chat-latest",
-    "gemini": "gemini-2.5-pro",
-}
-
-
 async def enqueue_llm_request(
     user_text: str,
     sender: dict,
@@ -159,7 +152,7 @@ async def enqueue_llm_request(
             gemini_extracted_text = "\n\n---\n\n".join(parts)
 
     # 4. Ставим задачу в очередь
-    model = _LLM_MODELS.get(mode, "GigaChat")
+    model = MODELS.get(mode, MODELS["aiagent"])
     task_data = {
         "mode": mode,
         "model": model,
@@ -189,14 +182,14 @@ class _MentorHandlerWrapper:
 
 # Словарь обработчиков режимов
 HANDLERS: dict[str, ModeHandler] = {
-    "aiagent":    GigachatHandler(),
-    "gigachatpro": LlmDirectHandler("giga_client",   "GigaChat",              "gigachatpro", "GigaChat Pro клиент не настроен."),
-    "chat":     LlmDirectHandler("openai_client",  "gpt-5.2-chat-latest",  "chat",     "OpenAI клиент не настроен."),
-    "gemini":      LlmDirectHandler("gemini_client",  "gemini-2.5-pro",       "gemini",      "Gemini клиент не настроен."),
+    "aiagent":     GigachatHandler(),
+    "gigachatpro": LlmDirectHandler("giga_client",   MODELS["gigachatpro"], "gigachatpro", "GigaChat Pro клиент не настроен."),
+    "chat":        LlmDirectHandler("openai_client",  MODELS["chat"],        "chat",        "OpenAI клиент не настроен."),
+    "gemini":      LlmDirectHandler("gemini_client",  MODELS["gemini"],      "gemini",      "Gemini клиент не настроен."),
     "mentor":      _MentorHandlerWrapper(),
     "edit":        EditHandler(),
     "rag":         RagHandler(),
-    "image":       ImageHandler("openai_client", "gpt-image-2", "OpenAI клиент не настроен."),
+    "image":       ImageHandler("openai_client", MODELS["image"], "OpenAI клиент не настроен."),
 }
 
 

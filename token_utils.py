@@ -33,7 +33,7 @@ class TokenCounter:
         # Модели GigaChat
         gigachat_models = [
             "gigachat-2-max", "gigachat-2-pro", "gigachat-2",
-            "gigachat-4", "gigachat"
+            "gigachat"
         ]
         
         # Проверяем, является ли модель GigaChat

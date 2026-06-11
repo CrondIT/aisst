@@ -81,7 +81,7 @@ def init_clients():
         logger.info("✅ GigaChat клиент инициализирован")
 
         from langchain_gigachat import GigaChat as LangChainGigaChat
-        _rag_model = MODELS.get("rag_llm", "GigaChat")
+        _rag_model = MODELS.get("rag_llm")
         giga_lc_client = LangChainGigaChat(
             credentials=GIGACHAT_CONFIG.credentials,
             scope=GIGACHAT_CONFIG.scope,

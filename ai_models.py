@@ -3,7 +3,7 @@ from gigachat.models import Chat, Messages, MessagesRole
 from typing import Optional, List
 from utils import logger
 from gigachat import GigaChat
-from global_state import get_token_limit
+from config import get_token_limit
 from gigachat.exceptions import (
     GigaChatException,
     AuthenticationError,
@@ -26,11 +26,14 @@ class OpenAIClient:
 
         # Если PROXY_IP задан в .env — подключаем SOCKS5-прокси.
         # AsyncOpenAI принимает httpx.AsyncClient через параметр http_client.
-        # close() OpenAI-клиента автоматически закрывает переданный httpx-клиент.
+        # close() OpenAI-клиента автоматически закрывает 
+        # переданный httpx-клиент.
         transport = get_socks_proxy_mount()
         if transport:
             http_client = httpx.AsyncClient(transport=transport)
-            self._client = AsyncOpenAI(api_key=api_key, http_client=http_client)
+            self._client = AsyncOpenAI(
+                api_key=api_key, http_client=http_client
+            )
             logger.info("OpenAI клиент создан с SOCKS5-прокси")
         else:
             self._client = AsyncOpenAI(api_key=api_key)
@@ -39,13 +42,11 @@ class OpenAIClient:
         self,
         messages: list[dict],
         temperature: float = 0.7,
-        model: str = "gpt-5.2-chat-latest",
+        model: str | None = None,
         enable_web_search: bool = True,
     ) -> str:
-        # max_tokens намеренно отсутствует: gpt-5.x Responses API
-        # не принимает max_output_tokens — управление длиной ответа
-        # осуществляется через обрезку контекста на уровне вызывающего кода.
-        model_name = model
+        from config import MODELS
+        model_name = model or MODELS["chat"]
         logger.info(
             f"OpenAI.chat: модель={model_name}, "
             f"сообщений={len(messages)}, "
@@ -88,10 +89,12 @@ class OpenAIClient:
         self,
         image_paths: list[str] | None = None,
         prompt: str = "",
-        model: str = "gpt-image-2",
+        model: str | None = None,
         n: int = 1,
         size: str = "1024x1024",
     ) -> tuple[bytes | None, str | None]:
+        from config import MODELS
+        model_name = model or MODELS["image"]
         """
         Генерирует или редактирует изображение через OpenAI-совместимый API.
 
@@ -114,12 +117,14 @@ class OpenAIClient:
 
         # Валидация параметра n
         if n < 1:
-            logger.error(f"OpenAI.generate_image: некорректное значение n={n}, используем n=1")
+            logger.error(
+                f"OpenAI.generate_image: некорректное n={n}, используем n=1"
+            )
             n = 1
 
         logger.info(
-            f"OpenAI.generate_image: модель={model}, "
-            f"входных_изображений={len([p for p in (image_paths or []) if p])}, "
+            f"OpenAI.generate_image: модель={model_name}, "
+            f"вход._изображений={len([p for p in (image_paths or []) if p])}, "
             f"генерируемых_изображений={n}, "
             f"размер={size}, "
             f"запрос={prompt[:100]}"
@@ -130,17 +135,19 @@ class OpenAIClient:
                     (p for p in image_paths if p and os.path.exists(p)), None
                 )
                 if image_path is None:
-                    raise FileNotFoundError("Нет доступных изображений для редактирования")
-                
+                    raise FileNotFoundError(
+                        "Нет доступных изображений для редактирования"
+                    )
+
                 # Конвертируем изображение в PNG для правильного MIME-типа
                 img = Image.open(image_path)
                 png_buffer = io.BytesIO()
                 img.save(png_buffer, format="PNG")
                 png_buffer.seek(0)
-                
+
                 # Передаём как tuple (filename, file_data, mime_type)
                 response = await self._client.images.edit(
-                    model=model,
+                    model=model_name,
                     image=("image.png", png_buffer, "image/png"),
                     prompt=prompt,
                     n=n,
@@ -148,7 +155,7 @@ class OpenAIClient:
                 )
             else:
                 response = await self._client.images.generate(
-                    model=model,
+                    model=model_name,
                     prompt=prompt,
                     n=n,
                     size=size,
@@ -166,7 +173,9 @@ class OpenAIClient:
                 # Скачиваем изображение по URL
                 import httpx
                 async with httpx.AsyncClient() as http_client:
-                    img_response = await http_client.get(first_image.url, timeout=60.0)
+                    img_response = await http_client.get(
+                        first_image.url, timeout=60.0
+                    )
                     img_response.raise_for_status()
                     image_bytes = img_response.content
             else:
@@ -202,12 +211,14 @@ class OpenAIClient:
                             error_detail = str(error_info)
                 except Exception:
                     pass
-            
+
             logger.error(
                 f"OpenAI.generate_image: ошибка [{err_type}]: {error_detail}",
                 exc_info=True,
             )
-            return None, f"Ошибка генерации изображения ({err_type}): {error_detail}"
+            return None, (
+                f"Ошибка генерации изображения ({err_type}): {error_detail}"
+            )
 
     async def close(self):
         await self._client.close()
@@ -220,11 +231,15 @@ class OpenAIClient:
             for model in models.data:
                 lines.append(f"🔹 `{model.id}`")
             result = "\n".join(lines)
-            logger.info(f"OpenAI.list_models: найдено {len(models.data)} моделей")
+            logger.info(
+                f"OpenAI.list_models: найдено {len(models.data)} моделей"
+            )
             return result
         except Exception as e:
             err_msg = str(e)
-            logger.error(f"OpenAI.list_models: ошибка [{type(e).__name__}]: {err_msg}")
+            logger.error(
+                f"OpenAI.list_models: ошибка [{type(e).__name__}]: {err_msg}"
+            )
             return f"❌ Ошибка при получении моделей OpenAI: {err_msg}"
 
 
@@ -282,10 +297,11 @@ class GeminiClient:
         messages: list[dict],
         temperature: float = 0.7,
         max_tokens: int = 4096,
-        model: str = "gemini-2.5-pro",
+        model: str | None = None,
         image_paths: list[str] | None = None,
     ) -> str:
-        model_name = model
+        from config import MODELS
+        model_name = model or MODELS["gemini"]
         logger.info(
             f"Gemini.chat: модель={model_name}, "
             f"сообщений={len(messages)}, "
@@ -422,7 +438,7 @@ class GeminiClient:
         import io
         from PIL import Image
         from google.genai import types
-        from global_state import MODELS
+        from config import MODELS
 
         model_name = model or MODELS["image"]
 
@@ -477,7 +493,8 @@ class GeminiClient:
             f"Gemini.generate_image: response type={type(response).__name__}"
         )
 
-        # Парсим ответ через response.parts (официальный путь SDK для image-моделей)
+        # Парсим ответ через response.parts 
+        # (официальный путь SDK для image-моделей)
         if hasattr(response, "parts") and response.parts:
             for part in response.parts:
                 try:
@@ -574,11 +591,11 @@ class GeminiClient:
         raise ValueError("Не удалось получить изображение из ответа модели")
 
 
-
 class GigaChatClient:
-    def __init__(self, client: GigaChat, model: str = "GigaChat"):
+    def __init__(self, client: GigaChat, model: str | None = None):
+        from config import MODELS
         self.client = client
-        self.model = model
+        self.model = model or MODELS["aiagent"]
 
     async def generate(
         self,
