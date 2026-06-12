@@ -1,4 +1,5 @@
 import os
+from dataclasses import dataclass
 from gigachat.models import Chat, Messages, MessagesRole
 from typing import Optional, List
 from utils import logger
@@ -14,6 +15,13 @@ from gigachat.exceptions import (
     RequestEntityTooLargeError,
     ServerError,
 )
+
+
+@dataclass
+class ChatResult:
+    """Результат чата: текст + опционально сгенерированное изображение."""
+    text: str | None = None
+    image: bytes | None = None
 
 
 class OpenAIClient:
@@ -44,42 +52,125 @@ class OpenAIClient:
         temperature: float = 0.7,
         model: str | None = None,
         enable_web_search: bool = True,
-    ) -> str:
+        image_paths: list[str] | None = None,
+        enable_image_generation: bool = False,
+    ) -> ChatResult:
         from config import MODELS
+        import base64
+        from PIL import Image
+        import io
+
         model_name = model or MODELS["chat"]
         logger.info(
             f"OpenAI.chat: модель={model_name}, "
             f"сообщений={len(messages)}, "
-            f"temperature={temperature}"
+            f"temperature={temperature}, "
+            f"изображений={len([p for p in (image_paths or []) if p])}, "
+            f"image_generation={enable_image_generation}"
         )
-        # Инструменты подключаем только если разрешён поиск
+
+        # Строим входные данные: если есть изображения — мультимодальный формат
+        if image_paths:
+            input_messages = list(messages)
+            valid_paths = [
+                p for p in image_paths if p and os.path.exists(p)
+            ]
+            if valid_paths:
+                for i in range(len(input_messages) - 1, -1, -1):
+                    msg = input_messages[i]
+                    if msg.get("role") == "user":
+                        text = msg.get("content", "")
+                        parts = [
+                            {"type": "input_text", "text": text}
+                        ]
+                        for path in valid_paths:
+                            img = Image.open(path)
+                            buf = io.BytesIO()
+                            img.save(buf, format="PNG")
+                            b64 = base64.b64encode(
+                                buf.getvalue()
+                            ).decode("utf-8")
+                            parts.append({
+                                "type": "input_image",
+                                "image_url":
+                                    f"data:image/png;base64,{b64}",
+                            })
+                        input_messages[i] = {
+                            "role": "user",
+                            "content": parts,
+                        }
+                        break
+        else:
+            input_messages = messages
+
+        # Инструменты
         tools = []
         if enable_web_search:
-            tools.append(
-                {
-                    "type": "web_search",
-                }
-            )
+            tools.append({"type": "web_search"})
+        if enable_image_generation:
+            tools.append({"type": "image_generation"})
+
         try:
-            # gpt-5.x работает только через responses API 
-            # (не chat.completions).
-            # Параметры temperature и max_output_tokens не передаём
+            # gpt-5.x работает только через responses API
             response = await self._client.responses.create(
                 model=model_name,
-                input=messages,
-                tools=tools,
+                input=input_messages,
+                tools=tools if tools else None,
                 timeout=300,
             )
-            content = response.output_text
-            if not content:
-                raise RuntimeError("Пустой контент в ответе OpenAI")
-            logger.info(f"OpenAI.chat: ответ ({len(content)} символов)")
-            return content
+
+            # Извлекаем текст из ответа
+            text = getattr(response, "output_text", None)
+            if not text:
+                text_parts = []
+                for item in response.output:
+                    if (
+                        hasattr(item, "type")
+                        and item.type == "message"
+                        and hasattr(item, "content")
+                    ):
+                        for c in item.content:
+                            if (
+                                hasattr(c, "type")
+                                and c.type == "output_text"
+                            ):
+                                text_parts.append(c.text)
+                text = "".join(text_parts)
+
+            # Извлекаем сгенерированное изображение
+            image_bytes = None
+            for item in response.output:
+                if (
+                    hasattr(item, "type")
+                    and item.type == "image_generation_call"
+                    and getattr(item, "status", None) == "completed"
+                ):
+                    b64_str = getattr(item, "result", None)
+                    if b64_str:
+                        image_bytes = base64.b64decode(b64_str)
+                        break
+
+            if image_bytes:
+                # Конвертируем в JPEG
+                img = Image.open(io.BytesIO(image_bytes))
+                out_buf = io.BytesIO()
+                img.save(out_buf, "JPEG", quality=95)
+                out_buf.seek(0)
+                image_bytes = out_buf.getvalue()
+                logger.info(
+                    f"OpenAI.chat: изображение "
+                    f"({len(image_bytes)} байт)"
+                )
+            else:
+                logger.info(
+                    f"OpenAI.chat: ответ ({len(text)} символов)"
+                )
+
+            return ChatResult(text=text, image=image_bytes)
+
         except RuntimeError:
             raise
         except Exception as e:
-            # Логируем без exc_info чтобы избежать потенциальных
-            # проблем loguru при нестандартных типах исключений SDK
             err_type = type(e).__name__
             err_msg = str(e)
             logger.error(f"OpenAI error [{err_type}]: {err_msg}")
@@ -131,24 +222,29 @@ class OpenAIClient:
         )
         try:
             if image_paths:
-                image_path = next(
-                    (p for p in image_paths if p and os.path.exists(p)), None
-                )
-                if image_path is None:
+                valid_paths = [
+                    p for p in image_paths if p and os.path.exists(p)
+                ]
+                if not valid_paths:
                     raise FileNotFoundError(
                         "Нет доступных изображений для редактирования"
                     )
 
-                # Конвертируем изображение в PNG для правильного MIME-типа
-                img = Image.open(image_path)
-                png_buffer = io.BytesIO()
-                img.save(png_buffer, format="PNG")
-                png_buffer.seek(0)
+                # Конвертируем ВСЕ изображения в PNG и передаём списком
+                # gpt-image-2 принимает до 16 файлов
+                image_files = []
+                for i, path in enumerate(valid_paths[:16]):
+                    img = Image.open(path)
+                    png_buffer = io.BytesIO()
+                    img.save(png_buffer, format="PNG")
+                    png_buffer.seek(0)
+                    image_files.append(
+                        (f"img_{i}.png", png_buffer, "image/png")
+                    )
 
-                # Передаём как tuple (filename, file_data, mime_type)
                 response = await self._client.images.edit(
                     model=model_name,
-                    image=("image.png", png_buffer, "image/png"),
+                    image=image_files,
                     prompt=prompt,
                     n=n,
                     size=size,

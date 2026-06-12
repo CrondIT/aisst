@@ -106,14 +106,18 @@ class ImageHandler(ModeHandler):
         # Ставим задачу в очередь Redis
         try:
             task_id = enqueue_task(queue_type, task_data, priority="normal")
-            logger.info(f"Задача {task_id[:8]}... поставлена в очередь {queue_type}")
+            logger.info(
+                f"Задача {task_id[:8]}... поставлена в очередь {queue_type}"
+            )
         except Exception as e:
-            logger.error(f"Ошибка постановки задачи в очередь: {e}", exc_info=True)
+            logger.error(
+                f"Ошибка постановки задачи в очередь: {e}", exc_info=True
+            )
             return f"⚠️ Ошибка: не удалось поставить задачу в очередь. {str(e)[:100]}"
 
         # Определяем позицию в очереди и примерное время ожидания
         queue_size = get_queue_size("image_gen") + get_queue_size("image_edit")
-        est_seconds = max(30, round((queue_size * 45) / MAX_CONCURRENT_IMAGES))
+        est_seconds = max(60, round((queue_size * 45) / MAX_CONCURRENT_IMAGES))
         if est_seconds >= 120:
             est_str = f"~{est_seconds // 60} мин."
         else:

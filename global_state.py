@@ -32,6 +32,8 @@ if os.getenv("USE_REDIS", "false").lower() != "true":
     user_edit_images_queue = {}
     # Хранит очередь изображений для режима gemini
     user_gemini_image_queue = {}
+    # Хранит очередь изображений для режима chat (OpenAI)
+    user_chat_image_queue = {}
     # Хранит список файлов (с извлечённым текстом) для режима gemini
     user_gemini_files = {}
 else:
@@ -39,7 +41,7 @@ else:
     user_contexts = user_modes = user_edit_data = user_file_data = {}
     user_edit_pending = user_pending_delete = user_previous_modes = {}
     edited_photo_id = user_last_edited_images = user_edit_images_queue = {}
-    user_gemini_image_queue = user_gemini_files = {}
+    user_gemini_image_queue = user_chat_image_queue = user_gemini_files = {}
     user_mentor_state = {}  # Состояние ментора для каждого пользователя
 
 MAX_CONTEXT_MESSAGES = 5
@@ -631,6 +633,41 @@ def clear_user_gemini_image_queue(user_id: int):
             q.delete_user_state(user_id, "gemini_image_queue")
     else:
         user_gemini_image_queue.pop(user_id, None)
+
+
+# ==================== Chat Image Queue ====================
+
+def get_user_chat_image_queue(user_id: int) -> list:
+    """Получает очередь изображений для chat-режима (OpenAI)"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            queue = q.get_user_state(user_id, "chat_image_queue")
+            if queue:
+                return queue
+    else:
+        return user_chat_image_queue.get(user_id, [])
+    return []
+
+
+def set_user_chat_image_queue(user_id: int, queue: list):
+    """Сохраняет очередь изображений для chat-режима"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.set_user_state(user_id, "chat_image_queue", queue)
+    else:
+        user_chat_image_queue[user_id] = queue
+
+
+def clear_user_chat_image_queue(user_id: int):
+    """Очищает очередь изображений chat-режима"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.delete_user_state(user_id, "chat_image_queue")
+    else:
+        user_chat_image_queue.pop(user_id, None)
 
 
 # ==================== Gemini Files ====================

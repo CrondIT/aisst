@@ -100,7 +100,8 @@ async def _call_llm(
     if mode in ("chat",):
         if not openai_client:
             raise RuntimeError("OpenAI клиент не настроен")
-        return await openai_client.chat(messages=messages, model=model)
+        result = await openai_client.chat(messages=messages, model=model)
+        return result.text or ""
 
     if mode == "gigachatpro":
         if not giga_client:

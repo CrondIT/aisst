@@ -27,6 +27,8 @@ from global_state import (
     clear_user_gemini_files,
     get_user_gemini_files,
     add_user_gemini_file,
+    get_user_chat_image_queue,
+    set_user_chat_image_queue,
 )
 from utils import logger
 from keyboards import COLLEGE_BUTTONS, START_BUTTONS
@@ -373,6 +375,14 @@ async def handle_image(
         if len(queue) > MAX_REF_IMAGES:
             queue = queue[-MAX_REF_IMAGES:]
         set_user_gemini_image_queue(user_id, queue)
+        return f"Изображение получено ({len(queue)} в очереди). Задайте вопрос."
+    if user_mode == "chat":
+        # Добавляем изображение в очередь chat-режима (OpenAI gpt-5.x multimodal)
+        queue = get_user_chat_image_queue(user_id)
+        queue.append(image_path)
+        if len(queue) > MAX_REF_IMAGES:
+            queue = queue[-MAX_REF_IMAGES:]
+        set_user_chat_image_queue(user_id, queue)
         return f"Изображение получено ({len(queue)} в очереди). Задайте вопрос."
     return "Режим еще не работает"
 

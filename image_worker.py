@@ -123,11 +123,13 @@ async def process_image_task(task_data: dict) -> dict:
             old_edit_data = get_user_edit_data(user_id)
 
             # Формируем подпись
-            prefix = (
-                "Сгенерировано по запросу: "
-                if not image_paths
-                else "Отредактировано по запросу: "
-            )
+            num_refs = len([p for p in image_paths if p])
+            if num_refs == 0:
+                prefix = "Сгенерировано по запросу: "
+            elif num_refs == 1:
+                prefix = "Отредактировано по запросу: "
+            else:
+                prefix = f"Объединено из {num_refs} изображений по запросу: "
             caption = prefix + prompt[:500]
 
             # Отправляем изображение пользователю
