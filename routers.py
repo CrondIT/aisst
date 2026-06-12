@@ -18,7 +18,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from global_state import ADMIN_API_TOKEN, TEMP_DIR
+from global_state import ADMIN_API_TOKEN, TEMP_DIR, VALID_TOKENS, MAX_UPLOAD_SIZE
 import bot_logic
 import max_api
 import max_update_handler
@@ -46,6 +46,22 @@ def _verify_admin(
         )
     if x_admin_token != ADMIN_API_TOKEN:
         raise HTTPException(status_code=403, detail="Forbidden")
+
+
+def _verify_api_token(
+    x_api_key: str = Header(default=None, alias="X-API-Key")
+) -> None:
+    """
+    Зависимость: проверка X-API-Key для публичных API-эндпоинтов.
+    Проверяет по списку VALID_TOKENS из .env.
+    """
+    if not VALID_TOKENS:
+        raise HTTPException(
+            status_code=503,
+            detail="API tokens not configured (VALID_TOKENS)"
+        )
+    if x_api_key not in VALID_TOKENS:
+        raise HTTPException(status_code=401, detail="Invalid API key")
 
 
 @router.get("/")
@@ -92,7 +108,10 @@ async def delete_subscription(
 
 
 @router.post("/save-file")
-async def upload_file(upload_file: UploadFile):
+async def upload_file(
+    upload_file: UploadFile,
+    _api: None = Depends(_verify_api_token),
+):
     if not upload_file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
 
@@ -100,15 +119,20 @@ async def upload_file(upload_file: UploadFile):
     unique_name = f"{uuid.uuid4().hex}{ext}"
     dest = os.path.join(TEMP_DIR, unique_name)
 
+    contents = await upload_file.read()
+    if len(contents) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size: {MAX_UPLOAD_SIZE // (1024*1024)} MB"
+        )
+
     try:
-        contents = await upload_file.read()
         with open(dest, "wb") as f:
             f.write(contents)
     except Exception as exc:
         logger.error(
             "Failed to save uploaded file %s: %s", upload_file.filename, exc
         )
-        # Убираем частичный файл при ошибке
         if os.path.exists(dest):
             os.remove(dest)
         raise HTTPException(status_code=500, detail="Failed to save file")
@@ -117,7 +141,6 @@ async def upload_file(upload_file: UploadFile):
         content={
             "status": "ok",
             "filename": unique_name,
-            "path": dest,
         }
     )
 
@@ -127,7 +150,11 @@ _giga_executor = ThreadPoolExecutor(max_workers=10)
 
 
 @router.post("/giga-chat")
-async def chat_with_giga(body: ChatRequest, request: Request):
+async def chat_with_giga(
+    body: ChatRequest,
+    request: Request,
+    _api: None = Depends(_verify_api_token),
+):
     """Endpoint для общения с GigaChat."""
     giga_client = request.app.giga_client
 
@@ -176,7 +203,10 @@ async def chat_with_giga(body: ChatRequest, request: Request):
 
 
 @router.post("/api/send-command")
-async def send_command(request: Request):
+async def send_command(
+    request: Request,
+    _api: None = Depends(_verify_api_token),
+):
     """
     API endpoint для отправки команды от имени пользователя
     (из мини-приложения).
@@ -188,8 +218,6 @@ async def send_command(request: Request):
 
     command = data.get("command", "")
     user_id = data.get("user_id")
-
-    print("command, user_id:", command, user_id)
 
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id is required")
@@ -215,6 +243,7 @@ async def send_command(request: Request):
 @router.post("/transcribe-giga")
 async def transcribe_voice(
     file: UploadFile,
+    _api: None = Depends(_verify_api_token),
 ):
     """Распознавание голосового сообщения через GigaChat."""
     # Определяем допустимые расширения

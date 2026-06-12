@@ -2,6 +2,7 @@ import logging
 import httpx
 import sys
 import os
+import uuid
 from PIL import Image
 from io import BytesIO
 from datetime import datetime
@@ -206,7 +207,8 @@ async def save_user_file(
             ).split(";")[0].strip()
 
             name = name[:90] if len(name) > 90 else name
-            filename = f"{default_name}_{user_id}_{name}.{ext}"
+            unique_id = uuid.uuid4().hex[:8]
+            filename = f"{default_name}_{user_id}_{name}_{unique_id}.{ext}"
             filepath = os.path.join(TEMP_DIR, filename)
 
             # Создаем папку temp, если её нет

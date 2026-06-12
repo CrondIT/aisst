@@ -45,7 +45,7 @@ else:
     user_mentor_state = {}  # Состояние ментора для каждого пользователя
 
 MAX_CONTEXT_MESSAGES = 5
-MAX_REF_IMAGES = 6  # Максимальное количество изображений для редактирования
+MAX_REF_IMAGES = 10  # Максимальное количество изображений для редактирования
 MAX_CONCURRENT_IMAGES = int(os.getenv("MAX_CONCURRENT_IMAGES", "3"))  # Параллельных задач генерации
 
 # разрешенные расширения для разных режимов
@@ -75,6 +75,7 @@ ALLOWED_EXTENSIONS = {
 
 TEMP_DIR = os.getenv("TEMP_DIR", "temp")
 GUEST_RAG_DIR = os.getenv("GUEST_RAG_DIR", "rag/guest")
+MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE", str(50 * 1024 * 1024)))  # 50 MB
 
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
@@ -138,6 +139,10 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 # ─── Безопасность ───
 # Токен для доступа к админ-эндпоинтам (/subscriptions)
 ADMIN_API_TOKEN = os.getenv("ADMIN_API_TOKEN", "")
+# Токены для доступа к API-эндпоинтам (/save-file, /giga-chat, /transcribe-giga, /api/send-command)
+VALID_TOKENS = [
+    t.strip() for t in os.getenv("VALID_TOKENS", "").split(",") if t.strip()
+]
 
 # Список доверенных IP для /webhook (пусто = без фильтрации)
 # MAX API может присылать с разных IP — задайте реальные при необходимости
@@ -353,11 +358,6 @@ DOCUMENT_JSON_SCHEMA = """
 # чтобы все Gunicorn воркеры видели одни и те же данные
 
 _use_redis = os.getenv("USE_REDIS", "false").lower() == "true"
-# Отладка УДАЛИТЬ!!!
-print(
-    f"[DEBUG] USE_REDIS={_use_redis}, env='{os.getenv('USE_REDIS')}'",
-        flush=True
-)
 
 _queue = None
 

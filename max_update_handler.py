@@ -205,8 +205,6 @@ async def process_update(
     if await db.create_user(user_id, nickname):
         logger.info(f"Создан пользователь: {nickname} (id={user_id})")
     user_data = await db.get_user(user_id)
-    permission = user_data["permission"]
-    print(nickname, permission)
 
     # 8. Обработка вложений
     attachments = body.get("attachments", [])
@@ -259,7 +257,7 @@ async def process_update(
                 await max_api.send_message(
                     user_id, f"Не удалось загрузить изображение: {filename}"
                 )
-                return
+                continue
             reply_text = await bot_logic.handle_image(
                 request, file_path, sender
             )
@@ -267,7 +265,7 @@ async def process_update(
                 await max_api.send_message(
                     user_id, reply_text, format="markdown"
                 )
-            return
+            continue
 
         # 8.3 Файлы
         if att.get("type") == "file" and attr_url:
@@ -371,14 +369,11 @@ async def handle_webhook(request: Request) -> tuple[bool, dict | None]:
 
     logger.info("=== Входящий webhook запрос ===")
     logger.info(f"Method: {request.method}, URL: {request.url}")
-    logger.info(f"Headers: {dict(request.headers)}")
 
     body = await request.body()
-    logger.info(f"Body: {body.decode('utf-8', errors='replace')}")
 
     # Проверка secret
     secret_header = request.headers.get("X-Max-Bot-Api-Secret")
-    logger.info(f"X-Max-Bot-Api-Secret header: '{secret_header}'")
     if not max_api.verify_webhook_secret(body, secret_header):
         logger.warning("Неверный X-Max-Bot-Api-Secret — запрос отклонён")
         raise HTTPException(status_code=403, detail="Invalid secret")

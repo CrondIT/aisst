@@ -183,9 +183,8 @@ class OpenAIClient:
         model: str | None = None,
         n: int = 1,
         size: str = "1024x1024",
-    ) -> tuple[bytes | None, str | None]:
-        from config import MODELS
-        model_name = model or MODELS["image"]
+        quality: str | None = None,
+    ) -> tuple[list[bytes] | None, str | None]:
         """
         Генерирует или редактирует изображение через OpenAI-совместимый API.
 
@@ -198,15 +197,17 @@ class OpenAIClient:
             model: модель (по умолчанию gpt-image-2)
             n: количество изображений (должно быть >= 1)
             size: размер изображения
+            quality: качество ("standard", "low", "medium", "high", "auto")
 
         Returns:
-            (image_bytes, None) — изображение в формате JPEG
+            ([bytes, ...], None) — список изображений в формате JPEG
             (None, error_message) — ошибка
         """
+        from config import MODELS
+        model_name = model or MODELS["image"]
         import io
         from PIL import Image
 
-        # Валидация параметра n
         if n < 1:
             logger.error(
                 f"OpenAI.generate_image: некорректное n={n}, используем n=1"
@@ -220,6 +221,7 @@ class OpenAIClient:
             f"размер={size}, "
             f"запрос={prompt[:100]}"
         )
+
         try:
             if image_paths:
                 valid_paths = [
@@ -230,71 +232,87 @@ class OpenAIClient:
                         "Нет доступных изображений для редактирования"
                     )
 
-                # Конвертируем ВСЕ изображения в PNG и передаём списком
+                # Конвертируем изображения в PNG и передаём с явным MIME-типом
                 # gpt-image-2 принимает до 16 файлов
                 image_files = []
                 for i, path in enumerate(valid_paths[:16]):
                     img = Image.open(path)
+                    if img.mode == "RGBA":
+                        img = img.convert("RGB")
                     png_buffer = io.BytesIO()
                     img.save(png_buffer, format="PNG")
                     png_buffer.seek(0)
                     image_files.append(
-                        (f"img_{i}.png", png_buffer, "image/png")
+                        (f"img_{i}.png", png_buffer.getvalue())
                     )
 
-                response = await self._client.images.edit(
+                edit_kwargs = dict(
                     model=model_name,
-                    image=image_files,
                     prompt=prompt,
                     n=n,
                     size=size,
                 )
+                if quality is not None:
+                    edit_kwargs["quality"] = quality
+
+                response = await self._client.images.edit(
+                    image=image_files,
+                    **edit_kwargs,
+                )
             else:
-                response = await self._client.images.generate(
+                gen_kwargs = dict(
                     model=model_name,
                     prompt=prompt,
                     n=n,
                     size=size,
+                )
+                if quality is not None:
+                    gen_kwargs["quality"] = quality
+
+                response = await self._client.images.generate(
+                    **gen_kwargs,
                 )
 
             if not response.data:
                 raise RuntimeError("Пустой ответ от OpenAI generate_image")
 
-            # Проверяем, есть ли b64_json (если API всё же вернул base64)
-            first_image = response.data[0]
-            if hasattr(first_image, 'b64_json') and first_image.b64_json:
-                from base64 import b64decode
-                image_bytes = b64decode(first_image.b64_json)
-            elif hasattr(first_image, 'url') and first_image.url:
-                # Скачиваем изображение по URL
-                import httpx
-                async with httpx.AsyncClient() as http_client:
-                    img_response = await http_client.get(
-                        first_image.url, timeout=60.0
-                    )
-                    img_response.raise_for_status()
-                    image_bytes = img_response.content
-            else:
-                raise RuntimeError("В ответе OpenAI нет ни b64_json, ни url")
+            from base64 import b64decode
+            all_images = []
+            for item in response.data:
+                if hasattr(item, 'b64_json') and item.b64_json:
+                    img_bytes = b64decode(item.b64_json)
+                elif hasattr(item, 'url') and item.url:
+                    import httpx
+                    async with httpx.AsyncClient() as http_client:
+                        img_resp = await http_client.get(
+                            item.url, timeout=60.0
+                        )
+                        img_resp.raise_for_status()
+                        img_bytes = img_resp.content
+                else:
+                    continue
 
-            # Конвертируем в JPEG
-            img = Image.open(io.BytesIO(image_bytes))
-            output_buffer = io.BytesIO()
-            img.save(output_buffer, "JPEG", quality=95)
-            output_buffer.seek(0)
-            result_bytes = output_buffer.getvalue()
+                img = Image.open(io.BytesIO(img_bytes))
+                if img.mode == "RGBA":
+                    img = img.convert("RGB")
+                output_buffer = io.BytesIO()
+                img.save(output_buffer, "JPEG", quality=95)
+                output_buffer.seek(0)
+                all_images.append(output_buffer.getvalue())
+
+            if not all_images:
+                raise RuntimeError("Не удалось извлечь изображения из ответа")
 
             logger.info(
-                f"OpenAI.generate_image: изображение "
-                f"({len(result_bytes)} байт)"
+                f"OpenAI.generate_image: получено {len(all_images)} "
+                f"изображений ({len(all_images[0])} байт первое)"
             )
-            return result_bytes, None
+            return all_images, None
 
         except Exception as e:
             err_type = type(e).__name__
             err_msg = str(e)
-            
-            # Пытаемся извлечь детали ошибки из OpenAI API
+
             error_detail = err_msg
             if hasattr(e, 'response'):
                 try:

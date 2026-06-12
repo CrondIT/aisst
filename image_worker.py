@@ -8,11 +8,12 @@ import logging
 import os
 import sys
 from dotenv import load_dotenv
+from loguru import logger as loguru_logger
 
 # Загружаем переменные окружения
 load_dotenv()
 
-# Инициализируем логирование
+# Инициализируем стандартное логирование
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -22,6 +23,21 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger("image_worker")
+
+# Настраиваем loguru (используется ai_models.py и другими модулями)
+loguru_logger.remove()
+loguru_logger.add(
+    sys.stdout,
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | {name}:{function}:{line} - {message}",
+    level="INFO",
+)
+loguru_logger.add(
+    "image_worker.log",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | {name}:{function}:{line} - {message}",
+    level="INFO",
+    encoding="utf-8",
+    enqueue=True,
+)
 
 # Импорт после настройки логирования
 from redis_utils import RedisQueue, RedisQueueError
@@ -64,6 +80,7 @@ async def process_image_task(task_data: dict) -> dict:
             - prompt: текстовый запрос
             - model: модель (gpt-image-2)
             - size: размер (1024x1024)
+            - quality: качество (standard, low, medium, high)
             - image_paths: список путей к файлам (для редактирования)
             - operation: "генерация" или "редактирование"
 
@@ -78,6 +95,7 @@ async def process_image_task(task_data: dict) -> dict:
     from config import MODELS
     model = task_data.get("model") or MODELS["image"]
     size = task_data.get("size", "1024x1024")
+    quality = task_data.get("quality")
     image_paths = task_data.get("image_paths", [])
     operation = task_data.get("operation", "генерация")
 
@@ -91,33 +109,34 @@ async def process_image_task(task_data: dict) -> dict:
 
     logger.info(
         f"Начало обработки: user_id={user_id}, "
-        f"операция={operation}, изображений={len(image_paths)}"
+        f"операция={operation}, изображений={len(image_paths)}, "
+        f"качество={quality}"
     )
 
     try:
         # Генерируем/редактируем изображение через OpenAI
-        image_bytes, text_response = await openai_client.generate_image(
+        images, text_response = await openai_client.generate_image(
             image_paths=image_paths,
             prompt=prompt,
             model=model,
             n=1,
             size=size,
+            quality=quality,
         )
 
         # Если модель вернула текстовый ответ вместо изображения
         if text_response is not None:
             await max_api.send_message(user_id, text_response)
-            # Очищаем временные файлы
             _cleanup_old_files(image_paths)
             set_user_edit_queue(user_id, [])
-            
+
             return {
                 "status": "completed",
                 "user_id": user_id,
             }
 
-        # Если получено изображение
-        if image_bytes is not None:
+        # Если получены изображения
+        if images is not None and len(images) > 0:
             os.makedirs(TEMP_DIR, exist_ok=True)
             new_file_path = os.path.join(TEMP_DIR, f"img_{user_id}.jpg")
             old_edit_data = get_user_edit_data(user_id)
@@ -130,30 +149,32 @@ async def process_image_task(task_data: dict) -> dict:
                 prefix = "Отредактировано по запросу: "
             else:
                 prefix = f"Объединено из {num_refs} изображений по запросу: "
-            caption = prefix + prompt[:500]
+            base_caption = prefix + prompt[:500]
 
-            # Отправляем изображение пользователю
-            result = await max_api.send_generated_image(
-                user_id=user_id,
-                image_bytes=image_bytes,
-                caption=caption,
-            )
+            # Отправляем каждое изображение
+            all_sent = True
+            for i, img_bytes in enumerate(images):
+                caption = base_caption if len(images) == 1 else (
+                    f"{base_caption} ({i + 1}/{len(images)})"
+                )
+                result = await max_api.send_generated_image(
+                    user_id=user_id,
+                    image_bytes=img_bytes,
+                    caption=caption,
+                )
+                if result != 200:
+                    logger.error(f"Ошибка отправки изображения {i + 1}: status={result}")
+                    all_sent = False
 
-            if result != 200:
-                logger.error(f"Ошибка отправки изображения: status={result}")
+            if not all_sent:
                 await max_api.send_message(
                     user_id,
-                    "⚠️ Изображение создано, но не удалось отправить.",
+                    "⚠️ Некоторые изображения созданы, но не отправлены.",
                 )
-                return {
-                    "status": "failed",
-                    "error": f"Не удалось отправить изображение: status={result}",
-                    "user_id": user_id,
-                }
 
-            # Сохраняем путь к новому изображению
+            # Сохраняем последнее изображение для истории редактирования
             with open(new_file_path, "wb") as f:
-                f.write(image_bytes)
+                f.write(images[-1])
             last_edited = old_edit_data.get("last_image")
             set_user_edit_data(user_id, {"last_image": new_file_path})
 
@@ -172,13 +193,13 @@ async def process_image_task(task_data: dict) -> dict:
             # Логируем биллинг
             await db_module.add_billing(user_id, "image", prompt, 0, 10)
 
-            logger.info(f"✅ Задача выполнена для user_id={user_id}")
+            logger.info(f"✅ Задача выполнена для user_id={user_id}, изображений={len(images)}")
             return {
                 "status": "completed",
                 "user_id": user_id,
             }
 
-        # Если ни изображения, ни текста не получено
+        # Если ни изображений, ни текста не получено
         error_msg = "Не удалось получить результат от модели"
         await max_api.send_message(user_id, f"⚠️ {error_msg}")
         return {
@@ -190,13 +211,12 @@ async def process_image_task(task_data: dict) -> dict:
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Ошибка обработки задачи: {e}", exc_info=True)
-        
-        # Уведомляем пользователя об ошибке
+
         await max_api.send_message(
             user_id,
             f"⚠️ Ошибка при генерации изображения:\n{error_msg[:200]}"
         )
-        
+
         return {
             "status": "failed",
             "error": error_msg,
