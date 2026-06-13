@@ -3,18 +3,13 @@ import os
 
 from fastapi import Request
 
-import db
 import max_api
 from config import MODELS
 from global_state import (
     get_user_edit_data,
-    set_user_edit_data,
     get_user_edit_queue,
-    set_user_edit_queue,
-    clear_user_pending_delete,
     enqueue_task,
     get_queue_size,
-    TEMP_DIR,
     MAX_REF_IMAGES,
     MAX_CONCURRENT_IMAGES,
 )
@@ -25,9 +20,11 @@ from handlers.base import ModeHandler
 class ImageHandler(ModeHandler):
     """
     Обработка режима image.
-    Генерация и редактирование изображений через LLM-клиент (OpenAI, Gemini и т.д.).
+    Генерация и редактирование изображений 
+    через LLM-клиент (OpenAI, Gemini и т.д.).
     Параметризован: client_attr — имя атрибута на app.state,
-    model_name — модель для генерации, error_msg — текст при отсутствии клиента.
+    model_name — модель для генерации, 
+    error_msg — текст при отсутствии клиента.
     """
 
     def __init__(
@@ -69,21 +66,20 @@ class ImageHandler(ModeHandler):
             ]
             image_paths.extend(valid_paths)
 
-        # Если нет изображений из очереди — берём последнее отредактированное
-        if not image_paths:
-            edit_data = get_user_edit_data(user_id)
-            last_edited = edit_data.get("last_image")
-            if last_edited and os.path.exists(last_edited):
-                image_paths.append(last_edited)
+        # Всегда добавляем последнее сгенерированное/отредактированное изображение
+        edit_data = get_user_edit_data(user_id)
+        last_edited = edit_data.get("last_image")
+        if last_edited and os.path.exists(last_edited) and last_edited not in image_paths:
+            image_paths.append(last_edited)
 
         # Определяем тип операции
         if image_paths:
             operation_type = "редактирование"
             queue_type = "image_edit"
 
-        # Ограничиваем количество изображений
+        # Ограничиваем количество изображений (оставляем ПОСЛЕДНИЕ)
         if len(image_paths) > MAX_REF_IMAGES:
-            image_paths = image_paths[:MAX_REF_IMAGES]
+            image_paths = image_paths[-MAX_REF_IMAGES:]
 
         logger.info(
             f"image_handler: user_id={user_id}, "
@@ -118,7 +114,7 @@ class ImageHandler(ModeHandler):
 
         # Определяем позицию в очереди и примерное время ожидания
         queue_size = get_queue_size("image_gen") + get_queue_size("image_edit")
-        est_seconds = max(60, round((queue_size * 45) / MAX_CONCURRENT_IMAGES))
+        est_seconds = max(60, round((queue_size * 90) / MAX_CONCURRENT_IMAGES))
         if est_seconds >= 120:
             est_str = f"~{est_seconds // 60} мин."
         else:

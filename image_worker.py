@@ -49,6 +49,7 @@ from global_state import (
     MAX_CONCURRENT_IMAGES,
     TEMP_DIR,
     get_user_edit_data,
+    get_user_edit_queue,
     set_user_edit_data,
     set_user_edit_queue,
     clear_user_pending_delete,
@@ -128,7 +129,11 @@ async def process_image_task(task_data: dict) -> dict:
         if text_response is not None:
             await max_api.send_message(user_id, text_response)
             _cleanup_old_files(image_paths)
-            set_user_edit_queue(user_id, [])
+            # Удаляем из очереди только то, что обработано (Bug 2)
+            used_set = set(image_paths)
+            current_queue = get_user_edit_queue(user_id)
+            remaining_queue = [p for p in current_queue if p not in used_set]
+            set_user_edit_queue(user_id, remaining_queue)
 
             return {
                 "status": "completed",
@@ -187,7 +192,11 @@ async def process_image_task(task_data: dict) -> dict:
 
             # Очищаем очередь и временные файлы исходных изображений
             _cleanup_old_files(image_paths)
-            set_user_edit_queue(user_id, [])
+            # Удаляем из очереди только те пути, что были обработаны (Bug 2)
+            used_set = set(image_paths)
+            current_queue = get_user_edit_queue(user_id)
+            remaining_queue = [p for p in current_queue if p not in used_set]
+            set_user_edit_queue(user_id, remaining_queue)
             clear_user_pending_delete(user_id)
 
             # Логируем биллинг

@@ -7,7 +7,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ModelSettings(BaseSettings):
-    """Реестр AI-моделей. Все поля маппятся на env-переменные с префиксом MODEL_."""
+    """
+    Реестр AI-моделей. Все поля маппятся на env-переменные 
+    с префиксом MODEL_.
+    """
 
     model_config = SettingsConfigDict(
         env_prefix="MODEL_",

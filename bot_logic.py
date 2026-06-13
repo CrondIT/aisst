@@ -264,8 +264,12 @@ async def handle_command(
     if command == "/billing":
         if user_data:
             balance = user_data["coins"] + user_data["giftcoins"]
-            return CommandResult(text=f"Уважаемый: {user_name}!\nВаш баланс: {balance} ₽")
-        return CommandResult(text=f"Пользователь: {user_name} в списках не значится)")
+            return CommandResult(
+                text=f"Уважаемый: {user_name}!\nВаш баланс: {balance} ₽"
+            )
+        return CommandResult(
+            text=f"Пользователь: {user_name} в списках не значится)"
+        )
     
     if command == "/models":
         text = await _handle_models_command(app_state)
@@ -281,12 +285,14 @@ async def handle_command(
         if user_mode == "gemini":
             clear_user_gemini_image_queue(user_id)
             clear_user_gemini_files(user_id)
-        return CommandResult(text=f"История диалога в режиме '{user_mode}' очищена.")
+        return CommandResult(
+            text=f"История диалога в режиме '{user_mode}' очищена."
+        )
     
     if command in mode_map:
         mode, reply = mode_map[command]
         
-        # При переключении с image — удаляем последний сохранённый файл
+        # При переключении с image — удаляем все файлы сессии
         current_mode = get_user_mode(user_id)
         if current_mode == "image" and mode != "image":
             edit_data = get_user_edit_data(user_id)
@@ -297,6 +303,15 @@ async def handle_command(
                 except OSError:
                     pass
             set_user_edit_data(user_id, {})
+            # Удаляем файлы из очереди загруженных изображений (Bug 3)
+            edit_queue = get_user_edit_queue(user_id)
+            for path in edit_queue:
+                if path and os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+            set_user_edit_queue(user_id, [])
         # При переключении с gemini — очищаем очереди
         if current_mode == "gemini" and mode != "gemini":
             clear_user_gemini_image_queue(user_id)
@@ -308,6 +323,14 @@ async def handle_command(
         
         # Для /image — очищаем очередь изображений для новой сессии
         if command == "/image":
+            # Сначала удаляем старые файлы, потом очищаем ссылки (Bug 3)
+            old_queue = get_user_edit_queue(user_id)
+            for path in old_queue:
+                if path and os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
             set_user_edit_queue(user_id, [])
         
         # Для /gemini — очищаем очереди для новой сессии
@@ -366,8 +389,6 @@ async def handle_image(
             queue = queue[-MAX_REF_IMAGES:]
         set_user_edit_queue(user_id, queue)
         return "Изображение получено. Опишите, что нужно изменить."
-    if user_mode == "edit":
-        return "Режим редактирования ещё не реализован."
     if user_mode == "gemini":
         # Добавляем изображение в очередь gemini-режима
         queue = get_user_gemini_image_queue(user_id)
