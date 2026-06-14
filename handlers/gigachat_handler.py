@@ -1,8 +1,8 @@
 """Обработчик режима aiagent (RAG-поиск по документам колледжа)."""
 from fastapi import Request
 
-import db
 import token_utils
+import db
 from rag_chain import ask_rag
 from handlers.base import ModeHandler
 from global_state import (
@@ -38,14 +38,22 @@ class GigachatHandler(ModeHandler):
         # 4. Добавляем ответ в контекст
         context.append({"role": "assistant", "content": answer})
 
-        # 5. Обрезаем контекст: system + последние MAX_CONTEXT_MESSAGES пар
+        # 5. Обрезаем контекст по лимиту токенов модели
+        model_name = MODELS.get("aiagent")
+        context = token_utils.truncate_messages_for_token_limit(
+            context,
+            model=model_name,
+            reserve_tokens=2500,
+        )
+
+        # 6. Обрезаем контекст: system + последние MAX_CONTEXT_MESSAGES пар
         system_msgs = [m for m in context if m.get("role") == "system"]
         non_system = [m for m in context if m.get("role") != "system"]
         if len(non_system) > MAX_CONTEXT_MESSAGES * 2:
             non_system = non_system[-(MAX_CONTEXT_MESSAGES * 2):]
         context = system_msgs + non_system
 
-        # 6. Сохраняем контекст
+        # 7. Сохраняем контекст
         await set_user_context_async(user_id, "aiagent", context)
 
         logger.info(
@@ -53,7 +61,9 @@ class GigachatHandler(ModeHandler):
             f"сообщений в контексте={len(non_system) // 2}"
         )
 
-        # 7. Биллинг
-        await db.add_billing(user_id, "aiagent", user_text, 0, 2)
+        # 8. Биллинг
+        from cost_tracker import calculate_cost
+        cost = calculate_cost(usage=None, model=MODELS.get("aiagent"), mode="aiagent")
+        await db.add_billing(user_id, "aiagent", user_text, 0, cost)
 
         return answer

@@ -200,7 +200,18 @@ async def process_image_task(task_data: dict) -> dict:
             clear_user_pending_delete(user_id)
 
             # Логируем биллинг
-            await db_module.add_billing(user_id, "image", prompt, 0, 10)
+            from cost_tracker import calculate_cost
+            cost = calculate_cost(
+                usage=None,
+                model=model,
+                mode="image",
+                is_image_gen=(operation == "генерация"),
+                is_image_edit=(operation == "редактирование"),
+                image_quality=quality,
+                image_size=size,
+                image_count=len(images),
+            )
+            await db_module.add_billing(user_id, "image", prompt, 0, cost)
 
             logger.info(f"✅ Задача выполнена для user_id={user_id}, изображений={len(images)}")
             return {

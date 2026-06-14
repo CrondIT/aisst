@@ -156,7 +156,11 @@ class LlmDirectHandler(ModeHandler):
         await set_user_context_async(user_id, self.mode_name, context)
 
         # 10. Биллинг
-        await db.add_billing(user_id, self.mode_name, user_text, 0, 5)
+        from cost_tracker import calculate_cost
+        model_name_for_cost = MODELS.get(self.mode_name) or self.model_name
+        usage = answer.usage if not isinstance(answer, str) else None
+        cost = calculate_cost(usage=usage, model=model_name_for_cost, mode=self.mode_name)
+        await db.add_billing(user_id, self.mode_name, user_text, 0, cost)
 
         # 11. Если пользователь запросил формат — создаём и отправляем файл
         formatted = await check_and_send_formatted(

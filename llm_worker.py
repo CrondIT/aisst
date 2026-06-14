@@ -43,6 +43,7 @@ from global_state import (
     MAX_CONTEXT_MESSAGES,
     _use_redis,
 )
+from cost_tracker import UsageInfo
 from shared.message_utils import check_and_send_formatted, get_file_extracted_text
 from rag_chain import ask_rag
 import max_api
@@ -95,25 +96,27 @@ def init_clients():
 async def _call_llm(
     mode: str, messages: list[dict], model: str,
     image_paths: list[str] | None = None,
-) -> str:
+) -> tuple[str, UsageInfo | None]:
     """Вызывает соответствующую LLM в зависимости от режима."""
     if mode in ("chat",):
         if not openai_client:
             raise RuntimeError("OpenAI клиент не настроен")
         result = await openai_client.chat(messages=messages, model=model)
-        return result.text or ""
+        return result.text or "", result.usage
 
     if mode == "gigachatpro":
         if not giga_client:
             raise RuntimeError("GigaChat клиент не настроен")
-        return await giga_client.chat(messages=messages, model=model)
+        result = await giga_client.chat(messages=messages, model=model)
+        return result.text or "", result.usage
 
     if mode == "gemini":
         if not gemini_client:
             raise RuntimeError("Gemini клиент не настроен")
-        return await gemini_client.chat(
+        result = await gemini_client.chat(
             messages=messages, model=model, image_paths=image_paths,
         )
+        return result.text or "", result.usage
 
     raise RuntimeError(f"Неизвестный режим LLM: {mode}")
 
@@ -183,7 +186,7 @@ async def process_llm_task(task_data: dict) -> dict:
         for attempt in range(MAX_RETRIES):
             try:
                 async with asyncio.timeout(LLM_TIMEOUT):
-                    answer = await _call_llm(
+                    answer, llm_usage = await _call_llm(
                         mode, user_prompt, model,
                         image_paths=gemini_image_paths,
                     )
@@ -227,7 +230,9 @@ async def process_llm_task(task_data: dict) -> dict:
         await set_user_context_async(user_id, mode, context)
 
         # 8. Биллинг
-        await db_module.add_billing(user_id, mode, user_text, 0, 5)
+        from cost_tracker import calculate_cost
+        cost = calculate_cost(usage=llm_usage, model=model, mode=mode)
+        await db_module.add_billing(user_id, mode, user_text, 0, cost)
 
         # 9. Если пользователь запросил формат — создаём файл
         formatted = await check_and_send_formatted(user_text, user_id, answer)

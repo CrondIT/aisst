@@ -75,7 +75,7 @@ class TokenCounter:
         elif not isinstance(text, str):
             text = str(text)
 
-        if "dall-e" in model:
+        if "dall-e" in model or "gpt-image" in model:
             return len(text)
 
         encoder = self._get_encoder(model)
@@ -91,7 +91,7 @@ class TokenCounter:
         """
         Count tokens for message list (OpenAI и GigaChat).
         """
-        if "dall-e" in model:
+        if "dall-e" in model or "gpt-image" in model:
             total_chars = 0
             for message in messages:
                 for key, value in message.items():
@@ -176,7 +176,7 @@ def truncate_messages_for_token_limit(
 
     # For image generation models,
     # use character-based limits instead of token limits
-    if "dall-e" in model:
+    if "dall-e" in model or "gpt-image" in model:
         # For image generation, we just need to limit the prompt length
         # Usually image models have character limits for prompts
         # Combine all text content to check against character limit
@@ -268,7 +268,7 @@ def check_token_usage(
         max_tokens = get_token_limit(model)
 
     # For image generation models, use character-based counting
-    if "dall-e" in model:
+    if "dall-e" in model or "gpt-image" in model:
         # Count total characters in all messages
         total_chars = 0
         for msg in messages:

@@ -2,6 +2,7 @@ import os
 from dataclasses import dataclass
 from gigachat.models import Chat, Messages, MessagesRole
 from typing import Optional, List
+from cost_tracker import UsageInfo, extract_usage_from_response
 from utils import logger
 from gigachat import GigaChat
 from config import get_token_limit
@@ -19,9 +20,10 @@ from gigachat.exceptions import (
 
 @dataclass
 class ChatResult:
-    """Результат чата: текст + опционально сгенерированное изображение."""
+    """Результат чата: текст + опционально сгенерированное изображение + usage."""
     text: str | None = None
     image: bytes | None = None
+    usage: UsageInfo | None = None
 
 
 class OpenAIClient:
@@ -166,7 +168,8 @@ class OpenAIClient:
                     f"OpenAI.chat: ответ ({len(text)} символов)"
                 )
 
-            return ChatResult(text=text, image=image_bytes)
+            usage = extract_usage_from_response(response, "openai")
+            return ChatResult(text=text, image=image_bytes, usage=usage)
 
         except RuntimeError:
             raise
@@ -484,8 +487,16 @@ class GeminiClient:
             content = response.text
             if content is None:
                 raise RuntimeError("Пустой контент в ответе Gemini")
-            logger.info(f"Gemini.chat: ответ ({len(content)} символов)")
-            return content
+            usage = extract_usage_from_response(response, "gemini")
+            if usage:
+                logger.info(
+                    f"Gemini.chat: {content} ({len(content)} символов, "
+                    f"prompt={usage.prompt_tokens}, "
+                    f"completion={usage.completion_tokens})"
+                )
+            else:
+                logger.info(f"Gemini.chat: ответ ({len(content)} символов)")
+            return ChatResult(text=content, usage=usage)
         except Exception as e:
             logger.error(f"Gemini error: {e}", exc_info=True)
             raise RuntimeError(f"Ошибка Gemini: {e}")
@@ -791,7 +802,7 @@ class GigaChatClient:
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         model: Optional[str] = None,
-    ) -> str:
+    ) -> ChatResult:
         """
         Чат с историей сообщений через GigaChat.
         
@@ -858,8 +869,16 @@ class GigaChatClient:
                 logger.error(f"content=None в ответе: {response}")
                 raise RuntimeError("Пустой контент в ответе GigaChat")
 
-            logger.info(f"GigaChat.chat: ответ ({len(content)} символов)")
-            return content
+            usage = extract_usage_from_response(response, "gigachat")
+            if usage:
+                logger.info(
+                    f"GigaChat.chat: ответ ({len(content)} символов, "
+                    f"prompt={usage.prompt_tokens}, "
+                    f"completion={usage.completion_tokens})"
+                )
+            else:
+                logger.info(f"GigaChat.chat: ответ ({len(content)} символов)")
+            return ChatResult(text=content, usage=usage)
         except AuthenticationError as e:
             logger.error(f"Ошибка аутентификации GigaChat: {e}")
             raise RuntimeError(f"Ошибка аутентификации GigaChat: {e}")

@@ -94,7 +94,7 @@ class ImageHandler(ModeHandler):
             "prompt": user_text,
             "model": self.model_name,
             "size": "1024x1024",
-            "quality": "high",
+            "quality": "medium",
             "image_paths": image_paths,
             "operation": operation_type,
             "client_attr": self.client_attr,
