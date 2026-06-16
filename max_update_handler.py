@@ -35,13 +35,24 @@ async def _process_audio_and_respond(
     sender: dict
 ) -> None:
     """Распознавание аудио и передача текста в bot_logic."""
+    import math
+    from config import pricing
+
     try:
-        recognized_text = await transcribe_audio(file_path)
+        recognized_text, duration_sec = await transcribe_audio(file_path)
         if not recognized_text:
             await max_api.send_message(
                 user_id, "Не удалось распознать аудио."
             )
             return
+
+        # Списываем монеты за распознавание (посекундно, округление вверх)
+        cost = math.ceil(duration_sec * pricing.speech_recognition_per_second)
+        if cost > 0:
+            await db.add_billing(
+                user_id, "voice", recognized_text, 0, cost,
+                notes=f"🎤 {duration_sec:.1f}с × {pricing.speech_recognition_per_second} мон/с"
+            )
 
         # Сначала показываем пользователю текст распознанного сообщения,
         # потом обрабатываем и отправляем ответ

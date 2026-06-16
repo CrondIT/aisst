@@ -2,9 +2,11 @@ import httpx
 import os
 import uuid
 import time
+import math
 import asyncio
 from typing import Optional
 from loguru import logger
+from mutagen import File as AudioFile
 from global_state import (
     RUS_TRUSTED_ROOT_CA_PEM,
     SALUTE_SPEECH_AUTH_KEY,
@@ -139,14 +141,30 @@ async def wait_for_task_completion(
     raise TimeoutError("Превышено время ожидания результата распознавания")
 
 
-async def transcribe_audio(file_path: str) -> str:
+def get_audio_duration(file_path: str) -> float:
+    """Возвращает длительность аудиофайла в секундах через mutagen."""
+    try:
+        audio = AudioFile(file_path)
+        if audio and audio.info and hasattr(audio.info, "length"):
+            return float(audio.info.length)
+        logger.warning(f"Не удалось определить длительность: {file_path}")
+        return 0.0
+    except Exception as e:
+        logger.error(f"Ошибка чтения длительности аудио: {e}")
+        return 0.0
+
+
+async def transcribe_audio(file_path: str) -> tuple[str, float]:
     """
     Основная функция для преобразования аудио в текст.
     :param file_path: Путь к аудиофайлу
-    :return: Распознанный текст
+    :return: Кортеж (распознанный_текст, длительность_в_секундах)
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Файл не найден: {file_path}")
+
+    # Получаем длительность аудио для биллинга
+    duration_sec = get_audio_duration(file_path)
 
     token = await get_access_token()
 
@@ -173,7 +191,8 @@ async def transcribe_audio(file_path: str) -> str:
             response.raise_for_status()
 
         data = response.json()
-        return parse_speech_response(data)
+        text = parse_speech_response(data)
+        return text, duration_sec
 
 
 def parse_speech_response(data: dict) -> str:

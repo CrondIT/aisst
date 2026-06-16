@@ -78,6 +78,9 @@ class PricingSettings(BaseSettings):
     image_large_size_mult: float = 1.5
     default_cost: float = 1.0
 
+    # Распознавание речи
+    speech_recognition_per_second: float = 1.0
+
 
 pricing = PricingSettings()
 
