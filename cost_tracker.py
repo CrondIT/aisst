@@ -1,4 +1,6 @@
-"""Модуль подсчёта токенов: предварительная оценка и извлечение из ответов SDK."""
+"""
+Модуль подсчёта токенов: предварительная оценка и извлечение из ответов SDK.
+"""
 import os
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -121,7 +123,9 @@ def extract_usage_from_response(
 
 
 def count_response_tokens(text: str, model: str) -> int:
-    """Подсчитывает токены в ответе модели (fallback, если SDK не отдал usage)."""
+    """
+    Подсчитывает токены в ответе модели (fallback, если SDK не отдал usage).
+    """
     return token_utils.token_counter.count_openai_tokens(text, model)
 
 

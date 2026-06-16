@@ -323,7 +323,8 @@ async def add_billing(
             # Атомарный UPDATE на уровне SQL — защита от race condition.
             # Два воркера не потеряют монеты: каждый применяет дельту,
             # а не перезаписывает прочитанное значение.
-            # SQL: UPDATE users SET coins = coins + ?, giftcoins = giftcoins + ? - ?
+            # SQL: UPDATE users SET 
+            # coins = coins + ?, giftcoins = giftcoins + ? - ?
             await db.execute(
                 update(User)
                 .where(User.id == userid)
@@ -334,7 +335,8 @@ async def add_billing(
             )
 
             # Читаем актуальный баланс после UPDATE в рамках той же транзакции.
-            # SQLite гарантирует: SELECT видит собственные незакоммиченные изменения.
+            # SQLite гарантирует: SELECT видит собственные 
+            # незакоммиченные изменения.
             row = (await db.execute(
                 select(User.coins, User.giftcoins).where(User.id == userid)
             )).one_or_none()

@@ -60,7 +60,7 @@ class TokenCounter:
                 self.openai_encoders[model] = tiktoken.get_encoding(
                     "cl100k_base"
                 )
-        
+
         return self.openai_encoders[model]
 
     def count_openai_tokens(
@@ -82,7 +82,7 @@ class TokenCounter:
         if encoder is None:
             # Fallback: приблизительная оценка (1 токен ~ 4 символа)
             return len(text) // 4
-        
+
         return len(encoder.encode(text))
 
     def count_openai_messages_tokens(

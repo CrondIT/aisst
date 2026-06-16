@@ -158,7 +158,8 @@ async def process_llm_task(task_data: dict) -> dict:
         if not context:
             context = []
 
-        # 2. Формируем промпт с учётом файла (полная копия логики LlmDirectHandler)
+        # 2. Формируем промпт с учётом файла 
+        # (полная копия логики LlmDirectHandler)
         from prompt_builder import full_prompt
         user_prompt = await full_prompt(
             user_id, user_text, extracted_text, context=context
@@ -238,7 +239,10 @@ async def process_llm_task(task_data: dict) -> dict:
         formatted = await check_and_send_formatted(user_text, user_id, answer)
         final_answer = formatted if formatted is not None else answer
 
-        logger.info(f"✅ {mode}: user_id={user_id}, ответ ({len(final_answer)} символов)")
+        logger.info(
+            f"✅ {mode}: user_id={user_id}, ответ "
+            f"({len(final_answer)} символов)"
+        )
         return {
             "status": "completed",
             "result": final_answer,
@@ -329,7 +333,7 @@ async def run_worker():
 
                 if task:
                     logger.info(
-                        f"📥 Получена задача {task.get('id', 'unknown')[:8]}... "
+                        f"📥 Получена задача {task.get('id', 'unknown')[:8]}.."
                         f"(тип: {task.get('type')})"
                     )
 
