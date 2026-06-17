@@ -263,7 +263,7 @@ class RedisListener:
                 f"⚠️ Неизвестный статус Image задачи: {status}"
             )
 
-    async def _send_max_message(self, user_id: int, text: str):
+    async def _send_max_message(self, user_id: int, text: str, format: str | None = None):
         """
         Отправляет сообщение пользователю через MAX API.
         Использует httpx напрямую, без зависимости от max_api модуля.
@@ -271,6 +271,7 @@ class RedisListener:
         Args:
             user_id: ID пользователя
             text: Текст сообщения
+            format: Формат сообщения ("markdown", "html" или None для plain text)
         """
         import httpx
 
@@ -283,6 +284,8 @@ class RedisListener:
         }
         params = {"user_id": user_id}
         payload = {"text": text}
+        if format in ("markdown", "html"):
+            payload["format"] = format
 
         try:
             async with httpx.AsyncClient() as client:
@@ -315,9 +318,10 @@ class RedisListener:
                 # Получаем результат
                 result_data = self.queue.get_task_result(task_id)
                 result = result_data.get("result") if result_data else None
+                result_format = result_data.get("format") if result_data else None
 
                 # Отправляем ответ пользователю
-                await self._send_max_message(user_id, result)
+                await self._send_max_message(user_id, result, format=result_format)
 
                 self.tasks_processed += 1
                 logger.info(

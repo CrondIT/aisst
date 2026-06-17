@@ -326,8 +326,8 @@ async def add_billing(
             # Очерёдность списания: сначала giftcoins, затем coins.
             net_change = inccoins + giftcoins - deccoins
             available_giftcoins = User.giftcoins + giftcoins
-            actual_gift_debit = func.least(available_giftcoins, deccoins)
-            coins_debit = func.greatest(0, deccoins - actual_gift_debit)
+            actual_gift_debit = func.min(available_giftcoins, deccoins)
+            coins_debit = func.max(0, deccoins - actual_gift_debit)
             stmt = (
                 update(User)
                 .where(User.id == userid)

@@ -127,7 +127,7 @@ async def process_image_task(task_data: dict) -> dict:
 
         # Если модель вернула текстовый ответ вместо изображения
         if text_response is not None:
-            await max_api.send_message(user_id, text_response)
+            await max_api.send_message(user_id, text_response, format="markdown")
             _cleanup_old_files(image_paths)
             # Удаляем из очереди только то, что обработано (Bug 2)
             used_set = set(image_paths)

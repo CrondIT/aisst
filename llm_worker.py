@@ -271,6 +271,7 @@ async def process_llm_task(task_data: dict) -> dict:
             "status": "completed",
             "result": final_answer,
             "user_id": user_id,
+            "format": "markdown",
         }
 
     except Exception as e:
