@@ -672,6 +672,7 @@ class RedisQueue:
             "user_id": result.get("user_id"),
             "result": result.get("result"),
             "error": result.get("error"),
+            "format": result.get("format"),
         }
         self.publish_notification(REDIS_NOTIFICATION_CHANNEL, notification)
         logger.info(f"📢 Результат задачи {task_id} ({task_type}) опубликован")

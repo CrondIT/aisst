@@ -208,7 +208,8 @@ class RedisListener:
             logger.info(
                 f"✅ LLM задача {task_id[:8]}... выполнена для user_id={user_id}"
             )
-            await self._send_max_message(user_id, result)
+            fmt = data.get("format")
+            await self._send_max_message(user_id, result, format=fmt)
             self.tasks_processed += 1
         elif status == "failed":
             logger.error(
