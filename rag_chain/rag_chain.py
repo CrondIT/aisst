@@ -12,8 +12,8 @@ from typing import Optional
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.language_models import BaseChatModel
+from langchain_core.documents import Document
 
 from .rag_embeddings import get_giga_embeddings
 from global_state import GUEST_RAG_DIR
@@ -152,6 +152,98 @@ def _format_docs(docs: list) -> str:
     return "\n\n".join(parts)
 
 
+# ── Document Expansion ──────────────────────────────────────────────────────────
+def _get_chunk_index(chunk_id: str) -> int:
+    """Извлекает номер чанка из ID вида abc123_chunk_42."""
+    match = re.search(r'_chunk_(\d+)$', chunk_id)
+    return int(match.group(1)) if match else 0
+
+
+def _get_chunk_count_for_filename(vector_db, filename: str) -> int:
+    """Возвращает количество чанков для документа с данным filename."""
+    result = vector_db.get(where={"filename": filename}, include=[])
+    return len(result.get("ids", []))
+
+
+async def _retrieve_with_expansion(
+    vector_db,
+    query: str,
+    top_k: int = 8,
+    fetch_k: int = 80,
+    lambda_mult: float = 0.9,
+) -> list[Document]:
+    """
+    MMR + Document Expansion для маленьких документов.
+
+    Если документ ≤ порога чанков — загружаем все его чанки (в порядке
+    исходного файла), а не только top_k от MMR.
+    Порог = max(20, всего_чанков_в_БД // 100).
+    """
+    # 1. MMR retrieval
+    retriever = vector_db.as_retriever(
+        search_type="mmr",
+        search_kwargs={"k": top_k, "fetch_k": fetch_k, "lambda_mult": lambda_mult},
+    )
+    initial_docs = await retriever.ainvoke(query)
+
+    # 2. Dynamic threshold
+    total_chunks = len(vector_db.get(include=[]).get("ids", []))
+    expand_threshold = max(20, total_chunks // 100)
+    logger.info(
+        f"RAG expansion: MMR={len(initial_docs)} доков, "
+        f"порог={expand_threshold} чанков (всего в БД {total_chunks})"
+    )
+
+    # 3. Identify small docs to expand
+    expand_filenames: set[str] = set()
+    for doc in initial_docs:
+        filename = doc.metadata.get("filename", "")
+        if not filename:
+            continue
+        chunk_count = _get_chunk_count_for_filename(vector_db, filename)
+        if 1 < chunk_count <= expand_threshold:
+            expand_filenames.add(filename)
+            logger.info(f"RAG expansion: будет расширен '{filename}' — {chunk_count} чанков")
+
+    if not expand_filenames:
+        return initial_docs
+
+    # 4. Build result: keep non-expanded docs as-is, replace expanded with all chunks
+    expanded_docs: list[Document] = []
+    already_expanded: set[str] = set()
+
+    for doc in initial_docs:
+        filename = doc.metadata.get("filename", "")
+        if filename in expand_filenames:
+            if filename in already_expanded:
+                continue  # уже добавили все чанки для этого файла
+            already_expanded.add(filename)
+            # Загружаем ВСЕ чанки файла
+            all_data = vector_db.get(
+                where={"filename": filename},
+                include=["documents", "metadatas"],
+            )
+            all_ids = all_data.get("ids", [])
+            all_texts = all_data.get("documents", [])
+            all_metadatas = all_data.get("metadatas", [])
+            # Сортируем по номеру чанка
+            sorted_indices = sorted(
+                range(len(all_ids)),
+                key=lambda i: _get_chunk_index(all_ids[i]),
+            )
+            for idx in sorted_indices:
+                expanded_docs.append(Document(
+                    page_content=all_texts[idx],
+                    metadata=all_metadatas[idx],
+                ))
+        else:
+            expanded_docs.append(doc)
+
+    logger.info(f"RAG expansion: итого {len(expanded_docs)} чанков "
+                f"(из них {sum(1 for f in expand_filenames for _ in [1])} документов расширено)")
+    return expanded_docs
+
+
 # ── Кэш промпта RAG ──────────────────────────────────────────────────────────
 _rag_prompt: Optional[ChatPromptTemplate] = None
 _rag_prompt_loaded = False
@@ -198,49 +290,35 @@ _rag_chain_params = None
 _rag_chain_prompt_id = None
 
 
+def reset_rag_chain():
+    """Сбрасывает кэш LCEL-цепочки. Вызывать после изменений в векторной БД."""
+    global _rag_chain, _rag_chain_params, _rag_chain_llm, _rag_chain_prompt_id
+    _rag_chain = None
+    _rag_chain_params = None
+    _rag_chain_llm = None
+    _rag_chain_prompt_id = None
+    logger.info("RAG: кэш цепочки сброшен (reset_rag_chain)")
+
+
 def _get_rag_chain(
     lc_llm: BaseChatModel,
     rag_prompt: ChatPromptTemplate,
-    top_k: int = 5,
-    fetch_k: int = 20,
-    lambda_mult: float = 0.9,
 ):
     """
-    Возвращает синглтон LCEL-цепочки для RAG.
-    Пересоздаёт цепочку только если LLM, параметры или промпт изменились.
+    Возвращает синглтон LCEL-цепочки для RAG (только промпт + LLM).
+    Ретривер не встроен — контекст передаётся снаружи через ask_rag.
     """
     global _rag_chain, _rag_chain_llm, _rag_chain_params, _rag_chain_prompt_id
 
     prompt_id = id(rag_prompt)
-    current_params = (id(lc_llm), top_k, fetch_k, lambda_mult, prompt_id)
+    current_params = (id(lc_llm), prompt_id)
 
     if _rag_chain is None or _rag_chain_params != current_params:
-        from .load_from_file import check_vector_db
-
-        embeddings = get_giga_embeddings()
-        vector_db = check_vector_db(persist_dir=GUEST_RAG_DIR, embeddings=embeddings)
-
-        retriever = vector_db.as_retriever(
-            search_type="mmr",
-            search_kwargs={
-                "k": top_k,
-                "fetch_k": fetch_k,
-                "lambda_mult": lambda_mult,
-            }
-        )
-
-        _rag_chain = (
-            {
-                "context": retriever | RunnableLambda(_format_docs),
-                "question": RunnablePassthrough(),
-            }
-            | rag_prompt
-            | lc_llm
-            | StrOutputParser()
-        )
+        _rag_chain = rag_prompt | lc_llm | StrOutputParser()
         _rag_chain_llm = lc_llm
         _rag_chain_params = current_params
         _rag_chain_prompt_id = prompt_id
+        logger.info("RAG: цепочка создана/пересоздана")
 
     return _rag_chain
 
@@ -248,49 +326,49 @@ def _get_rag_chain(
 async def ask_rag(
     user_text: str,
     lc_llm: BaseChatModel,
-    top_k: int = 5,
-    fetch_k: int = 20,
+    top_k: int = 8,
+    fetch_k: int = 80,
     lambda_mult: float = 0.9,
 ) -> str:
     """
     Поиск ответа в ChromaDB + генерация через LangChain-совместимый LLM.
-    Использует MMR (Maximum Marginal Relevance) для разнообразия источников.
+    Поиск: MMR + Document Expansion для маленьких документов.
+    Запрос поиска дополняется контекстом техникума.
     Промпт загружается из базы данных.
     """
     try:
         _start_memory_tracking()
 
         rag_prompt = await _load_rag_prompt()
-        chain = _get_rag_chain(lc_llm, rag_prompt, top_k, fetch_k, lambda_mult)
+        chain = _get_rag_chain(lc_llm, rag_prompt)
 
-        # ── Диагностика: проверяем, что в ChromaDB и что вернул ретривер ──
+        # ── Поиск с расширением контекста техникума ──
         from .load_from_file import check_vector_db
-        _db = check_vector_db(
+        embeddings = get_giga_embeddings()
+        vector_db = check_vector_db(
             persist_dir=GUEST_RAG_DIR,
-            embeddings=get_giga_embeddings(),
+            embeddings=embeddings,
         )
-        _all = _db.get(include=["metadatas"])
+        all_chunks = vector_db.get(include=["metadatas"])
         logger.info(
-            f"RAG диагностика: в БД {len(_all.get('ids', []))} чанков, "
-            f"цепочка {'кэширована' if _rag_chain_params is not None else 'новая'}"
+            f"RAG диагностика: в БД {len(all_chunks.get('ids', []))} чанков"
         )
 
-        # Проверяем, что вернёт ретривер
-        _test_docs = _db.similarity_search(user_text, k=top_k)
-        logger.info(
-            f"RAG диагностика: similarity_search вернул {len(_test_docs)} доков, "
-            f"формат_докс содержит 'не найдены': "
-            f"{'не найдены' in _format_docs(_test_docs)}"
+        docs = await _retrieve_with_expansion(
+            vector_db, user_text, top_k, fetch_k, lambda_mult,
         )
-        # ── Конец диагностики ──
 
-        answer: str = await chain.ainvoke(user_text)
+        context = _format_docs(docs)
+
+        answer: str = await chain.ainvoke(
+            {"context": context, "question": user_text}
+        )
         logger.info(f"RAG ответ: {len(answer)} символов. Текст: {answer[:300]}")
 
         gc.collect()
         _log_memory_usage("RAG: ")
 
-        if "не найден" in answer.lower():
+        if "не найден" in answer.lower() or "информация не найдена" in answer.lower():
             logger.warning(
                 f"RAG: модель не нашла информацию. Запрос: '{user_text}'"
             )

@@ -487,6 +487,10 @@ DEFAULT_PROMPTS = {
 Пример: «ФЗ от 5 апреля 2013 г N 44 ФЗ О контрактной системе», Статья 32
 Копируй название документа ТОЧНО как указано в поле 'Документ:'.
 
+ВАЖНО: Если в предоставленных фрагментах нет информации для ответа на вопрос,
+напиши ТОЛЬКО одну фразу (без источников):
+«В предоставленных документах информация не найдена.»
+
 Фрагменты документов:
 {context}""",
         "human": "{question}",
@@ -498,14 +502,33 @@ async def init_default_prompts():
     """
     Инициализирует промпты по умолчанию в базе данных.
     Создаёт записи если их нет, иначе пропускает.
+    При повторном запуске обновляет существующие промпты, если их текст
+    совпадает со старым значением по умолчанию (чтобы подхватить улучшения).
     Безопасно при параллельном запуске нескольких воркеров (ON CONFLICT DO NOTHING).
     """
+    # Старый текст промпта rag_default — для авто-обновления существующих БД
+    _OLD_RAG_DEFAULT_SYSTEM = (
+        "Ты — помощник студентов Саранского строительного техникума.\n"
+        "Отвечай только про техникумы, колледжи, cреднее профессиональное образование.\n"
+        "Не включай в ответ информацию про высшее образование и про ВУЗы\n"
+        "Отвечай ТОЛЬКО на основе предоставленных фрагментов документов.\n"
+        "Внимательно изучи ВСЕ предоставленные фрагменты и объедини информацию.\n"
+        "Если в документах несколько фактов — приведи их все.\n"
+        "Если информация противоречит — укажи это.\n"
+        "Отвечай кратко: 5-12 предложений.\n"
+        "Не придумывай факты.\n"
+        "ВАЖНО: в конце ответа ОБЯЗАТЕЛЬНО укажи источники.\n"
+        "Формат: «Название документа», <Статья/Раздел>\n"
+        "Пример: «ФЗ от 5 апреля 2013 г N 44 ФЗ О контрактной системе», Статья 32\n"
+        "Копируй название документа ТОЧНО как указано в поле 'Документ:'.\n"
+        "\n"
+        "Фрагменты документов:\n"
+        "{context}"
+    )
+
     try:
         async with AsyncSessionLocal() as db:
             for prompt_key, data in DEFAULT_PROMPTS.items():
-                # ON CONFLICT DO NOTHING — если второй воркер успел вставить раньше,
-                # не бросаем IntegrityError, просто пропускаем.
-                # inserted_primary_key is None при конфликте → версию не дублируем.
                 stmt = sqlite_insert(Prompt).values(
                     prompt_key=prompt_key,
                     description=data["description"],
@@ -525,6 +548,35 @@ async def init_default_prompts():
                     )
                     db.add(version)
                     logger.info(f"Инициализирован промпт: {prompt_key}")
+                else:
+                    # Авто-обновление: если существующий промпт совпадает со старым дефолтом
+                    existing = await db.execute(
+                        select(Prompt).where(Prompt.prompt_key == prompt_key)
+                    )
+                    prompt = existing.scalar_one_or_none()
+                    if prompt and prompt_key == "rag_default":
+                        if prompt.current_system_text == _OLD_RAG_DEFAULT_SYSTEM:
+                            prompt.current_system_text = data["system"]
+                            prompt.current_human_text = data["human"]
+                            from datetime import datetime
+                            prompt.updated_at = datetime.now()
+                            old_text = data["system"]
+                            # Сохраняем предыдущую версию
+                            version_result = await db.execute(
+                                select(PromptVersion).where(
+                                    PromptVersion.prompt_id == prompt.id
+                                ).order_by(PromptVersion.version_number.desc()).limit(1)
+                            )
+                            last_version = version_result.scalar_one_or_none()
+                            next_v = (last_version.version_number + 1) if last_version else 1
+                            db.add(PromptVersion(
+                                prompt_id=prompt.id,
+                                version_number=next_v,
+                                system_text=old_text,
+                                human_text=data["human"],
+                                created_by=0,
+                            ))
+                            logger.info(f"Авто-обновление промпта: {prompt_key} -> v{next_v}")
 
             await db.commit()
     except Exception as e:

@@ -4,6 +4,7 @@ from .rag_chain import (
     ask_rag,
     invalidate_rag_prompt_cache,
     list_all_documents_in_db,
+    reset_rag_chain,
 )
 from .rag_embeddings import (
     get_giga_embeddings,

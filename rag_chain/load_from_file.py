@@ -24,11 +24,15 @@ _vector_db_dir = None
 
 
 def reset_vector_db():
-    """Сбрасывает инстанс ChromaDB. Используется после добавления новых файлов."""
+    """Сбрасывает инстанс ChromaDB и кэш RAG-цепочки.
+    Вызывать после изменений (добавления/удаления файлов) в векторной БД."""
     global _vector_db, _vector_db_dir
     _vector_db = None
     _vector_db_dir = None
     logger.info("ChromaDB инстанс сброшен")
+    # Ленивый импорт: rag_chain.py импортирует из load_from_file — был бы цикл
+    from .rag_chain import reset_rag_chain
+    reset_rag_chain()
 
 
 # ── Настройки сплиттера ─────────────────────────────────────────────────────
@@ -87,7 +91,8 @@ def check_vector_db(persist_dir: str, embeddings):
     try:
         _vector_db = Chroma(
             persist_directory=persist_dir,
-            embedding_function=embeddings
+            embedding_function=embeddings,
+            collection_metadata={"hnsw:space": "cosine"},
         )
         _vector_db_dir = persist_dir
         logger.info(f"Инициализирована база в {persist_dir}")
