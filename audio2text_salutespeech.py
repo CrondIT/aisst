@@ -2,11 +2,10 @@ import httpx
 import os
 import uuid
 import time
-import math
 import asyncio
 from typing import Optional
 from loguru import logger
-from mutagen import File as AudioFile
+from utils import get_audio_duration
 from global_state import (
     RUS_TRUSTED_ROOT_CA_PEM,
     SALUTE_SPEECH_AUTH_KEY,
@@ -139,19 +138,6 @@ async def wait_for_task_completion(
             await asyncio.sleep(2)
 
     raise TimeoutError("Превышено время ожидания результата распознавания")
-
-
-def get_audio_duration(file_path: str) -> float:
-    """Возвращает длительность аудиофайла в секундах через mutagen."""
-    try:
-        audio = AudioFile(file_path)
-        if audio and audio.info and hasattr(audio.info, "length"):
-            return float(audio.info.length)
-        logger.warning(f"Не удалось определить длительность: {file_path}")
-        return 0.0
-    except Exception as e:
-        logger.error(f"Ошибка чтения длительности аудио: {e}")
-        return 0.0
 
 
 async def transcribe_audio(file_path: str) -> tuple[str, float]:

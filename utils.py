@@ -7,6 +7,7 @@ from PIL import Image
 from io import BytesIO
 from datetime import datetime
 from loguru import logger
+from mutagen import File as AudioFile
 from global_state import (
     PROXY_IP,
     PROXY_PORT,
@@ -265,3 +266,16 @@ def split_long_message(
     if current_message:
         text_parts.append(current_message)
     return text_parts
+
+
+def get_audio_duration(file_path: str) -> float:
+    """Возвращает длительность аудиофайла в секундах через mutagen."""
+    try:
+        audio = AudioFile(file_path)
+        if audio and audio.info and hasattr(audio.info, "length"):
+            return float(audio.info.length)
+        logger.warning(f"Не удалось определить длительность: {file_path}")
+        return 0.0
+    except Exception as e:
+        logger.error(f"Ошибка чтения длительности аудио: {e}")
+        return 0.0

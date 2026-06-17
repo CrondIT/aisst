@@ -263,8 +263,29 @@ async def ask_rag(
         rag_prompt = await _load_rag_prompt()
         chain = _get_rag_chain(lc_llm, rag_prompt, top_k, fetch_k, lambda_mult)
 
+        # ── Диагностика: проверяем, что в ChromaDB и что вернул ретривер ──
+        from .load_from_file import check_vector_db
+        _db = check_vector_db(
+            persist_dir=GUEST_RAG_DIR,
+            embeddings=get_giga_embeddings(),
+        )
+        _all = _db.get(include=["metadatas"])
+        logger.info(
+            f"RAG диагностика: в БД {len(_all.get('ids', []))} чанков, "
+            f"цепочка {'кэширована' if _rag_chain_params is not None else 'новая'}"
+        )
+
+        # Проверяем, что вернёт ретривер
+        _test_docs = _db.similarity_search(user_text, k=top_k)
+        logger.info(
+            f"RAG диагностика: similarity_search вернул {len(_test_docs)} доков, "
+            f"формат_докс содержит 'не найдены': "
+            f"{'не найдены' in _format_docs(_test_docs)}"
+        )
+        # ── Конец диагностики ──
+
         answer: str = await chain.ainvoke(user_text)
-        logger.info(f"RAG ответ: {len(answer)} символов")
+        logger.info(f"RAG ответ: {len(answer)} символов. Текст: {answer[:300]}")
 
         gc.collect()
         _log_memory_usage("RAG: ")
