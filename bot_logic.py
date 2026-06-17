@@ -123,18 +123,40 @@ async def enqueue_llm_request(
     user_text: str,
     sender: dict,
     mode: str,
-) -> None:
+) -> str | None:
     """
     Сохраняет сообщение пользователя в контекст и ставит задачу в очередь LLM.
 
     Вызывается из max_update_handler вместо прямого вызова handle_message
     для LLM-режимов, когда USE_REDIS=True.
+
+    Возвращает None при успехе, или строку ошибки (недостаточно монет).
     """
     user_id = int(sender.get("user_id"))
 
     # 1. Загружаем контекст и добавляем сообщение пользователя
     context = await get_user_context_async(user_id, mode)
     context.append({"role": "user", "content": user_text})
+
+    # 1.5 Проверка баланса для chat режима (до сохранения контекста)
+    if mode == "chat":
+        from cost_tracker import estimate_chat_cost
+
+        model_name = MODELS.get(mode)
+        estimated_cost = await estimate_chat_cost(
+            messages=context,
+            model=model_name,
+        )
+        user_data = await db.get_user(user_id)
+        if user_data:
+            balance = user_data["coins"] + user_data["giftcoins"]
+            if balance < estimated_cost:
+                return (
+                    f"⚠️ Недостаточно монет для выполнения запроса.\n"
+                    f"Требуется: ~{estimated_cost} ₽\n"
+                    f"Ваш баланс: {balance} ₽"
+                )
+
     await set_user_context_async(user_id, mode, context)
 
     # 2. Проверяем, есть ли файл
@@ -171,6 +193,7 @@ async def enqueue_llm_request(
         raise RuntimeError("USE_REDIS=false — LLM очередь не доступна")
 
     enqueue_task("llm", task_data, priority="normal")
+    return None
 
 
 class _MentorHandlerWrapper:

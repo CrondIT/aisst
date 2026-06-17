@@ -166,9 +166,9 @@ async def process_llm_task(task_data: dict) -> dict:
         )
 
         # 3. Обрезаем контекст по токенам
+        model_name_for_limits = MODELS.get(mode)
         if not extracted_text:
             import token_utils
-            model_name_for_limits = MODELS.get(mode)
             truncated = token_utils.truncate_messages_for_token_limit(
                 user_prompt,
                 model=model_name_for_limits,
@@ -179,6 +179,30 @@ async def process_llm_task(task_data: dict) -> dict:
             user_prompt = truncated
 
         logger.info(f"{mode}: user_id={user_id}, сообщений={len(user_prompt)}")
+
+        # 3.5 Проверка баланса для chat режима
+        if mode == "chat":
+            from cost_tracker import estimate_chat_cost
+
+            estimated_cost = await estimate_chat_cost(
+                messages=user_prompt,
+                model=model_name_for_limits,
+            )
+            user_data = await db_module.get_user(user_id)
+            if user_data:
+                balance = user_data["coins"] + user_data["giftcoins"]
+                if balance < estimated_cost:
+                    await max_api.send_message(
+                        user_id,
+                        f"⚠️ Недостаточно монет для выполнения запроса.\n"
+                        f"Требуется: ~{estimated_cost} ₽\n"
+                        f"Ваш баланс: {balance} ₽",
+                    )
+                    return {
+                        "status": "failed",
+                        "error": "Недостаточно монет",
+                        "user_id": user_id,
+                    }
 
         # 4. Вызов LLM с retry
         answer = None

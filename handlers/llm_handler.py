@@ -97,8 +97,8 @@ class LlmDirectHandler(ModeHandler):
 
         # 4. Обрезаем контекст по лимиту токенов (только если нет файла,
         #    иначе full_prompt уже сделал обрезку)
+        model_name_for_limits = MODELS.get(self.mode_name)
         if not extracted_text:
-            model_name_for_limits = MODELS.get(self.mode_name)
             truncated = token_utils.truncate_messages_for_token_limit(
                 user_prompt,
                 model=model_name_for_limits,
@@ -107,6 +107,27 @@ class LlmDirectHandler(ModeHandler):
             if len(truncated) > MAX_CONTEXT_MESSAGES:
                 truncated = truncated[-MAX_CONTEXT_MESSAGES:]
             user_prompt = truncated
+
+        # 4.5 Проверка баланса для chat режима
+        if self.mode_name == "chat":
+            from cost_tracker import estimate_chat_cost
+
+            estimated_cost = await estimate_chat_cost(
+                messages=user_prompt,
+                model=model_name_for_limits,
+                image_paths=chat_image_paths,
+            )
+            user_data = await db.get_user(user_id)
+            if user_data:
+                balance = user_data["coins"] + user_data["giftcoins"]
+                if balance < estimated_cost:
+                    await max_api.send_message(
+                        user_id,
+                        f"⚠️ Недостаточно монет для выполнения запроса.\n"
+                        f"Требуется: ~{estimated_cost} ₽\n"
+                        f"Ваш баланс: {balance} ₽",
+                    )
+                    return None
 
         logger.info(
             f"{self.mode_name}: user_id={user_id}, "
@@ -159,7 +180,13 @@ class LlmDirectHandler(ModeHandler):
         from cost_tracker import calculate_cost
         model_name_for_cost = MODELS.get(self.mode_name) or self.model_name
         usage = answer.usage if not isinstance(answer, str) else None
-        cost = calculate_cost(usage=usage, model=model_name_for_cost, mode=self.mode_name)
+        is_img = image_bytes is not None
+        cost = calculate_cost(
+            usage=usage,
+            model=model_name_for_cost,
+            mode=self.mode_name,
+            is_image_gen=is_img,
+        )
         await db.add_billing(user_id, self.mode_name, user_text, 0, cost)
 
         # 11. Если пользователь запросил формат — создаём и отправляем файл

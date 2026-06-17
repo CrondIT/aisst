@@ -122,6 +122,32 @@ def extract_usage_from_response(
     return None
 
 
+async def estimate_chat_cost(
+    messages: list[dict],
+    model: str,
+    image_paths: list[str] | None = None,
+) -> int:
+    """
+    Предварительная оценка стоимости запроса для chat-режима.
+    Использует input_tokens и реалистичный коэффициент output_tokens = input // 4.
+
+    Returns:
+        Стоимость в coins (минимум 1).
+    """
+    input_tokens = await estimate_input_tokens(
+        messages=messages,
+        model=model,
+        image_paths=image_paths,
+    )
+    output_tokens = max(500, input_tokens // 4)
+    estimated_usage = UsageInfo(
+        prompt_tokens=input_tokens,
+        completion_tokens=output_tokens,
+        total_tokens=input_tokens + output_tokens,
+    )
+    return calculate_cost(usage=estimated_usage, model=model, mode="chat")
+
+
 def count_response_tokens(text: str, model: str) -> int:
     """
     Подсчитывает токены в ответе модели (fallback, если SDK не отдал usage).
@@ -176,6 +202,8 @@ def calculate_cost(
         model_lower = model.lower()
 
         def _rate(rates: dict[str, float]) -> float:
+            if model_lower in rates:
+                return rates[model_lower]
             sorted_keys = sorted(rates, key=len, reverse=True)
             for key in sorted_keys:
                 if key in model_lower:

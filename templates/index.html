@@ -31,6 +31,7 @@
 
 {% block scripts %}
 <script>
+const API_TOKEN = '{{ api_token }}';
 console.log('Script loaded, WebApp:', window.WebApp);
 window.addEventListener('load', function() {
     console.log('Window loaded, checking WebApp:', window.WebApp);
@@ -105,7 +106,10 @@ async function sendCommand(command) {
     try {
         const response = await fetch('/api/send-command', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': API_TOKEN
+            },
             body: JSON.stringify({command: command, user_id: user_id, user_name: user_name})
         });
         const result = await response.json();

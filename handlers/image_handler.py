@@ -3,8 +3,9 @@ import os
 
 from fastapi import Request
 
+import db
 import max_api
-from config import MODELS
+from config import MODELS, pricing
 from global_state import (
     get_user_edit_data,
     get_user_edit_queue,
@@ -81,6 +82,29 @@ class ImageHandler(ModeHandler):
         if len(image_paths) > MAX_REF_IMAGES:
             image_paths = image_paths[-MAX_REF_IMAGES:]
 
+        # Проверка баланса перед постановкой в очередь
+        from cost_tracker import calculate_cost
+        estimated_cost = calculate_cost(
+            usage=None,
+            model=self.model_name,
+            mode="image",
+            is_image_gen=(queue_type == "image_gen"),
+            is_image_edit=(queue_type == "image_edit"),
+            image_quality=pricing.image_default_quality,
+            image_size=pricing.image_default_size,
+            image_count=1,
+        )
+        user_data = await db.get_user(user_id)
+        if user_data:
+            balance = user_data["coins"] + user_data["giftcoins"]
+            if balance < estimated_cost:
+                return (
+                    f"⚠️ Недостаточно монет для генерации изображения.\n"
+                    f"Требуется: ~{estimated_cost} ₽\n"
+                    f"Ваш баланс: {balance} ₽\n"
+                    f"Пополните баланс в разделе /billing"
+                )
+
         logger.info(
             f"image_handler: user_id={user_id}, "
             f"клиент={self.client_attr}, модель={self.model_name}, "
@@ -93,8 +117,8 @@ class ImageHandler(ModeHandler):
             "user_id": user_id,
             "prompt": user_text,
             "model": self.model_name,
-            "size": "1024x1024",
-            "quality": "medium",
+            "size": pricing.image_default_size,
+            "quality": pricing.image_default_quality,
             "image_paths": image_paths,
             "operation": operation_type,
             "client_attr": self.client_attr,

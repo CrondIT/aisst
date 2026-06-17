@@ -336,10 +336,13 @@ async def process_update(
     # 10. LLM-режимы → очередь (если USE_REDIS=True)
     user_mode = get_user_mode(user_id)
     if _use_redis and user_mode in bot_logic.LLM_QUEUE_MODES:
-        await bot_logic.enqueue_llm_request(user_text, sender, user_mode)
-        await max_api.send_message(
-            user_id, "⏳ Запрос обрабатывается..."
-        )
+        error = await bot_logic.enqueue_llm_request(user_text, sender, user_mode)
+        if error:
+            await max_api.send_message(user_id, error)
+        else:
+            await max_api.send_message(
+                user_id, "⏳ Запрос обрабатывается..."
+            )
         return
 
     try:

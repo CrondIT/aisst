@@ -76,6 +76,8 @@ class PricingSettings(BaseSettings):
     image_high_quality_mult: float = 2.0
     image_large_size_threshold: int = 1536
     image_large_size_mult: float = 1.5
+    image_default_quality: str = "medium"
+    image_default_size: str = "1024x1024"
     default_cost: float = 1.0
 
     # Распознавание речи

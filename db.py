@@ -323,16 +323,34 @@ async def add_billing(
             # Атомарный UPDATE на уровне SQL — защита от race condition.
             # Два воркера не потеряют монеты: каждый применяет дельту,
             # а не перезаписывает прочитанное значение.
-            # SQL: UPDATE users SET 
-            # coins = coins + ?, giftcoins = giftcoins + ? - ?
-            await db.execute(
+            # Очерёдность списания: сначала giftcoins, затем coins.
+            net_change = inccoins + giftcoins - deccoins
+            available_giftcoins = User.giftcoins + giftcoins
+            actual_gift_debit = func.least(available_giftcoins, deccoins)
+            coins_debit = func.greatest(0, deccoins - actual_gift_debit)
+            stmt = (
                 update(User)
                 .where(User.id == userid)
                 .values(
-                    coins=User.coins + inccoins,
-                    giftcoins=User.giftcoins + giftcoins - deccoins,
+                    giftcoins=available_giftcoins - actual_gift_debit,
+                    coins=User.coins + inccoins - coins_debit,
                 )
             )
+            # Защита от ухода баланса в минус: UPDATE не выполнится,
+            # если итоговый баланс (coins + giftcoins) станет < 0.
+            # WHERE добавляется только для дебетовых операций (net_change < 0).
+            if net_change < 0:
+                stmt = stmt.where(
+                    User.coins + User.giftcoins + net_change >= 0
+                )
+            result = await db.execute(stmt)
+
+            if result.rowcount == 0:
+                logger.warning(
+                    f"user_id={userid}: недостаточно монет "
+                    f"(net_change={net_change})"
+                )
+                return False
 
             # Читаем актуальный баланс после UPDATE в рамках той же транзакции.
             # SQLite гарантирует: SELECT видит собственные 

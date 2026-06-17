@@ -66,11 +66,11 @@ def _verify_api_token(
 
 @router.get("/")
 async def index(request: Request):
-    context = {}
+    api_token = VALID_TOKENS[0] if VALID_TOKENS else ""
     return request.app.templates.TemplateResponse(
         request,
         "index.html",
-        context,
+        {"api_token": api_token},
     )
 
 
