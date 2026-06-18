@@ -140,17 +140,21 @@ async def wait_for_task_completion(
     raise TimeoutError("Превышено время ожидания результата распознавания")
 
 
-async def transcribe_audio(file_path: str) -> tuple[str, float]:
+async def transcribe_audio(
+    file_path: str, duration_sec: float | None = None
+) -> tuple[str, float]:
     """
     Основная функция для преобразования аудио в текст.
     :param file_path: Путь к аудиофайлу
+    :param duration_sec: Длительность аудио (если уже известна, чтобы не читать файл повторно)
     :return: Кортеж (распознанный_текст, длительность_в_секундах)
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Файл не найден: {file_path}")
 
-    # Получаем длительность аудио для биллинга
-    duration_sec = get_audio_duration(file_path)
+    # Получаем длительность аудио для биллинга, если ещё не известна
+    if duration_sec is None:
+        duration_sec = get_audio_duration(file_path)
 
     token = await get_access_token()
 

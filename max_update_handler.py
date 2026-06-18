@@ -15,6 +15,7 @@ import lifespan
 from utils import (
     logger,
     save_user_file,
+    get_audio_duration,
 )
 from fastapi import Request, HTTPException
 from starlette.background import BackgroundTasks
@@ -39,25 +40,50 @@ async def _process_audio_and_respond(
     from config import pricing
 
     try:
-        recognized_text, duration_sec = await transcribe_audio(file_path)
+        # 1. Получаем длительность аудио для расчёта стоимости ДО транскрипции
+        duration_sec = get_audio_duration(file_path)
+        cost = math.ceil(duration_sec * pricing.speech_recognition_per_second)
+
+        # 2. Проверяем баланс пользователя ДО распознавания
+        user_data = await db.get_user(user_id)
+        if user_data:
+            balance = user_data["coins"] + user_data["giftcoins"]
+            if balance < cost:
+                await max_api.send_message(
+                    user_id,
+                    f"⚠️ Недостаточно монет для распознавания голосового сообщения.\n"
+                    f"Требуется: ~{cost} ₽\n"
+                    f"Ваш баланс: {balance} ₽"
+                )
+                return
+
+        # 3. Распознаём аудио (передаём duration_sec, чтобы не читать файл повторно)
+        recognized_text, _ = await transcribe_audio(file_path, duration_sec)
         if not recognized_text:
             await max_api.send_message(
                 user_id, "Не удалось распознать аудио."
             )
             return
 
-        # Списываем монеты за распознавание (посекундно, округление вверх)
-        cost = math.ceil(duration_sec * pricing.speech_recognition_per_second)
+        # 4. Списываем монеты за распознавание (посекундно, округление вверх)
         if cost > 0:
-            await db.add_billing(
+            billing_ok = await db.add_billing(
                 user_id, "voice", recognized_text, 0, cost,
                 notes=f"🎤 {duration_sec:.1f}с × {pricing.speech_recognition_per_second} мон/с"
             )
+            if not billing_ok:
+                logger.warning(
+                    f"user_id={user_id}: не удалось списать {cost} монет за голосовое"
+                )
+                await max_api.send_message(
+                    user_id, "⚠️ Не удалось списать монеты за распознавание."
+                )
+                return
 
-        # Сначала показываем пользователю текст распознанного сообщения,
-        # потом обрабатываем и отправляем ответ
+        # 5. Показываем пользователю текст распознанного сообщения
         await max_api.send_message(user_id, recognized_text)
 
+        # 6. Обрабатываем распознанный текст как обычное сообщение
         reply_text = await bot_logic.handle_message(
             request, recognized_text, sender
         )
