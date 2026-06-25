@@ -1,14 +1,24 @@
 """Модуль для взаимодействия с MAX API (отправка, подписки)."""
 
+import os
+import asyncio
 import httpx
 from global_state import (
     MAX_API_TOKEN,
     MAX_BASE_URL,
     WEBHOOK_URL,
     WEBHOOK_SECRET,
+    RUS_TRUSTED_ROOT_CA_PEM,
 )
 from utils import logger, split_long_message
-import asyncio
+
+
+def _get_max_client() -> httpx.AsyncClient:
+    """Создаёт httpx клиент с сертификатом Минцифры для MAX API."""
+    verify = RUS_TRUSTED_ROOT_CA_PEM
+    if verify and os.path.exists(verify):
+        return httpx.AsyncClient(verify=verify)
+    return httpx.AsyncClient()
 
 
 async def send_message(
@@ -32,7 +42,7 @@ async def send_message(
     # Разбиваем сообщение на части
     parts = split_long_message(text, MESSAGE_LIMIT=4000)
     
-    async with httpx.AsyncClient() as client:
+    async with _get_max_client() as client:
         last_status = None
         for i, part in enumerate(parts):
             payload = {"text": part}
@@ -100,7 +110,7 @@ async def send_image(
     if caption:
         payload["text"] = caption
     
-    async with httpx.AsyncClient() as client:
+    async with _get_max_client() as client:
         try:
             response = await client.post(
                 url, headers=headers, params=params, json=payload
@@ -161,7 +171,7 @@ async def send_inline_message(
     if format in ("markdown", "html"):
         payload["format"] = format
 
-    async with httpx.AsyncClient() as client:
+    async with _get_max_client() as client:
         try:
             response = await client.post(
                 url, headers=headers, params=params, json=payload
@@ -211,7 +221,7 @@ async def subscribe_webhook() -> None:
 
     # Удаляем существующие подписки с тем же URL (защита от дубликатов)
     try:
-        async with httpx.AsyncClient() as client:
+        async with _get_max_client() as client:
             response = await client.get(url, headers=headers)
             if response.status_code == 200:
                 subscriptions = response.json()
@@ -259,7 +269,7 @@ async def subscribe_webhook() -> None:
     if WEBHOOK_SECRET:
         payload["secret"] = WEBHOOK_SECRET
 
-    async with httpx.AsyncClient() as client:
+    async with _get_max_client() as client:
         try:
             response = await client.post(url, headers=headers, json=payload)
             if response.status_code == 200:
@@ -277,7 +287,7 @@ async def get_subscriptions() -> dict:
     """Просмотр текущих подписок."""
     url = f"{MAX_BASE_URL}/subscriptions"
     headers = {"Authorization": MAX_API_TOKEN}
-    async with httpx.AsyncClient() as client:
+    async with _get_max_client() as client:
         response = await client.get(url, headers=headers)
         return response.json()
 
@@ -287,7 +297,7 @@ async def delete_subscription(subscription_id: int = None) -> dict:
     url = f"{MAX_BASE_URL}/subscriptions"
     headers = {"Authorization": MAX_API_TOKEN}
     params = {"subscription_id": subscription_id} if subscription_id else {}
-    async with httpx.AsyncClient() as client:
+    async with _get_max_client() as client:
         response = await client.delete(url, headers=headers, params=params)
         return response.json()
 
@@ -319,7 +329,7 @@ async def upload_file(
     params = {"type": file_type}
     
     try:
-        async with httpx.AsyncClient() as client:
+        async with _get_max_client() as client:
             response = await client.post(
                 upload_url_endpoint, 
                 headers=headers, 
@@ -504,7 +514,7 @@ async def send_document(
     if caption:
         payload["text"] = caption
     
-    async with httpx.AsyncClient() as client:
+    async with _get_max_client() as client:
         for attempt in range(max_retries):
             try:
                 response = await client.post(

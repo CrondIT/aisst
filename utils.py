@@ -16,6 +16,7 @@ from global_state import (
     TEMP_DIR,
     MAX_BASE_URL,
     MAX_API_TOKEN,
+    RUS_TRUSTED_ROOT_CA_PEM,
 )
 
 
@@ -32,7 +33,13 @@ async def send_message_from_file(user_id: int, text: str) -> int | None:
     params = {"user_id": user_id}
     payload = {"text": text}
 
-    async with httpx.AsyncClient() as client:
+    verify = RUS_TRUSTED_ROOT_CA_PEM
+    if verify and os.path.exists(verify):
+        verify_param = verify
+    else:
+        verify_param = True
+
+    async with httpx.AsyncClient(verify=verify_param) as client:
         try:
             response = await client.post(
                 url, headers=headers, params=params, json=payload

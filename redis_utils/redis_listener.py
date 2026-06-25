@@ -274,9 +274,10 @@ class RedisListener:
             text: Текст сообщения
             format: Формат сообщения ("markdown", "html" или None для plain text)
         """
+        import os
         import httpx
 
-        from global_state import MAX_API_TOKEN, MAX_BASE_URL
+        from global_state import MAX_API_TOKEN, MAX_BASE_URL, RUS_TRUSTED_ROOT_CA_PEM
 
         url = f"{MAX_BASE_URL}/messages"
         headers = {
@@ -288,8 +289,14 @@ class RedisListener:
         if format in ("markdown", "html"):
             payload["format"] = format
 
+        verify = RUS_TRUSTED_ROOT_CA_PEM
+        if verify and os.path.exists(verify):
+            verify_param = verify
+        else:
+            verify_param = True
+
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(verify=verify_param) as client:
                 response = await client.post(
                     url, headers=headers, params=params, json=payload
                 )
